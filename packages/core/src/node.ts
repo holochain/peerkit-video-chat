@@ -9,6 +9,8 @@ export interface ChatNodeOptions {
   bootstrapRelays: RelayAddress[];
   displayName: string;
   events: RoomEvents;
+  /** Fires once the local agent info has been registered with a bootstrap relay. */
+  onRelayConnected?: (relayedAddress: string) => void;
 }
 
 export interface ChatNode {
@@ -68,6 +70,9 @@ export async function startChatNode(
     })
     .withPeerDisconnectedObserver((agentId) => {
       roomRef.current?.onPeerDisconnected(agentId);
+    })
+    .withRelayConnectedObserver((addr) => {
+      options.onRelayConnected?.(addr);
     });
 
   if (options.id !== undefined) {
