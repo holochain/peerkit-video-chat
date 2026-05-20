@@ -1,69 +1,92 @@
-const selfEl = document.getElementById("self") as HTMLDivElement;
-const remoteAddressInput = document.getElementById(
-  "remote-address",
-) as HTMLInputElement;
-const connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
-const toAgentInput = document.getElementById("to-agent") as HTMLInputElement;
-const msgInput = document.getElementById("msg") as HTMLInputElement;
-const sendBtn = document.getElementById("send-btn") as HTMLButtonElement;
-const logEl = document.getElementById("log") as HTMLPreElement;
+import { els } from "./dom.js";
+import {
+  appendChat,
+  clearError,
+  renderState,
+  setSelfAgent,
+  showError,
+} from "./view.js";
 
-function log(line: string): void {
-  logEl.textContent += `${line}\n`;
-  logEl.scrollTop = logEl.scrollHeight;
-}
+let initialized = false;
+let initializing = false;
 
-async function bootstrap(): Promise<void> {
+async function init(displayName: string): Promise<void> {
+  if (initialized || initializing) return;
+  initializing = true;
   try {
-    if (window.peer === undefined) {
-      throw new Error("preload bridge missing: window.peer is undefined");
-    }
-    const port = 31_000 + Math.floor(Math.random() * 1_000);
-    const listenAddress = `/ip4/127.0.0.1/tcp/${port}`;
-    const { agentId } = await window.peer.start(listenAddress);
-    selfEl.textContent = `agentId=${agentId} listening=${listenAddress}`;
-    log(`peer started: ${agentId}`);
-    log(`listening on ${listenAddress}`);
-    connectBtn.disabled = false;
-    sendBtn.disabled = false;
+    const { agentId } = await window.app.init(displayName);
+    setSelfAgent(agentId);
+    els.nameEdit.value = displayName;
+
+    els.nameModal.classList.add("hidden");
+    els.appHeader.classList.remove("hidden");
+    els.appMain.classList.remove("hidden");
+
+    window.app.onState(renderState);
+    window.app.onChat(appendChat);
+    initialized = true;
   } catch (err) {
-    const msg = (err as Error).message ?? String(err);
-    selfEl.textContent = `peer failed to start: ${msg}`;
-    log(`startup error: ${msg}`);
-    console.error(err);
+    els.nameError.textContent = (err as Error).message ?? String(err);
+    els.nameError.classList.remove("hidden");
+  } finally {
+    initializing = false;
   }
 }
 
-connectBtn.addEventListener("click", () => {
-  void (async () => {
-    const remote = remoteAddressInput.value.trim();
-    if (remote === "") return;
-    try {
-      await window.peer.connect(remote);
-      log(`connected to ${remote}`);
-    } catch (err) {
-      log(`connect failed: ${(err as Error).message}`);
-    }
-  })();
+els.nameSubmit.addEventListener("click", () => {
+  const name = els.nameInput.value.trim();
+  if (name === "") {
+    els.nameError.textContent = "Display name cannot be empty.";
+    els.nameError.classList.remove("hidden");
+    return;
+  }
+  els.nameError.classList.add("hidden");
+  void init(name);
 });
 
-sendBtn.addEventListener("click", () => {
-  void (async () => {
-    const to = toAgentInput.value.trim();
-    const text = msgInput.value;
-    if (to === "" || text === "") return;
-    try {
-      await window.peer.send(to, text);
-      log(`-> ${to.slice(0, 12)}…: ${text}`);
-      msgInput.value = "";
-    } catch (err) {
-      log(`send failed: ${(err as Error).message}`);
-    }
-  })();
+els.nameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") els.nameSubmit.click();
 });
 
-window.peer.onMessage(({ fromAgent, text }) => {
-  log(`<- ${fromAgent.slice(0, 12)}…: ${text}`);
+els.nameEdit.addEventListener("change", () => {
+  const name = els.nameEdit.value.trim();
+  if (name === "") return;
+  clearError();
+  window.app.setDisplayName(name).catch((err: unknown) => {
+    showError(`name update failed: ${(err as Error).message}`);
+  });
 });
 
-void bootstrap();
+els.joinBtn.addEventListener("click", () => {
+  const name = els.roomInput.value.trim();
+  if (name === "") return;
+  clearError();
+  window.app.joinRoom(name).catch((err: unknown) => {
+    showError(`join failed: ${(err as Error).message}`);
+  });
+});
+
+els.roomInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") els.joinBtn.click();
+});
+
+els.leaveBtn.addEventListener("click", () => {
+  clearError();
+  window.app.leaveRoom().catch((err: unknown) => {
+    showError(`leave failed: ${(err as Error).message}`);
+  });
+});
+
+els.chatSend.addEventListener("click", () => {
+  const body = els.chatInput.value;
+  if (body === "") return;
+  els.chatInput.value = "";
+  clearError();
+  window.app.sendChat(body).catch((err: unknown) => {
+    showError(`send failed: ${(err as Error).message}`);
+  });
+});
+
+els.chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") els.chatSend.click();
+});

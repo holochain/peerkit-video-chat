@@ -1,26 +1,43 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { startPeer, type Peer } from "@peerkit-video-chat/core";
-import type { AgentId } from "@peerkit/api";
+
+import { app, BrowserWindow, ipcMain } from "electron";
+
+import {
+  startChatNode,
+  type ChatNode,
+  type IncomingChat,
+  type RoomStateView,
+} from "@peerkit-video-chat/core";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-let peer: Peer | undefined;
+let chat: ChatNode | undefined;
 let mainWindow: BrowserWindow | undefined;
 
 function emit(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
 }
 
+function getRelayAddress(): string {
+  const addr = process.env["PEERKIT_RELAY_ADDR"]?.trim();
+  if (addr === undefined || addr === "") {
+    throw new Error(
+      "No relay address. Set PEERKIT_RELAY_ADDR to a bootstrap relay multiaddr " +
+        "(the dev relay prints one to copy: `npm run dev:relay`).",
+    );
+  }
+  return addr;
+}
+
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
-    width: 720,
-    height: 480,
+    width: 900,
+    height: 640,
     title: "peerkit-video-chat (showcase)",
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: resolve(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -29,47 +46,45 @@ async function createWindow(): Promise<void> {
   if (process.env["ELECTRON_RENDERER_URL"] !== undefined) {
     await mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    await mainWindow.loadFile(
-      join(__dirname, "../renderer/index.html"),
-    );
+    await mainWindow.loadFile(resolve(__dirname, "../renderer/index.html"));
   }
 }
 
-ipcMain.handle("peer:start", async (_event, listenAddress?: string) => {
-  if (peer !== undefined) {
-    throw new Error("Peer already started");
+ipcMain.handle("chat:init", async (_event, displayName: string) => {
+  if (chat !== undefined) {
+    return { agentId: chat.agentId };
   }
-  try {
-    peer = await startPeer({
-      id: "desktop",
-      listenAddress,
-      onMessage: (fromAgent: AgentId, text: string) => {
-        emit("peer:message", { fromAgent, text });
-      },
-    });
-    return { agentId: peer.agentId, listenAddress: peer.listenAddress };
-  } catch (err) {
-    console.error("peer:start failed:", err);
-    throw err;
-  }
+  const relayAddress = getRelayAddress();
+  chat = await startChatNode({
+    bootstrapRelays: [relayAddress],
+    displayName,
+    events: {
+      onState: (view: RoomStateView) => emit("chat:state", view),
+      onChat: (incoming: IncomingChat) => emit("chat:chat", incoming),
+    },
+  });
+  return { agentId: chat.agentId };
 });
 
-ipcMain.handle("peer:connect", async (_event, remoteAddress: string) => {
-  if (peer === undefined) {
-    throw new Error("Peer not started");
-  }
-  await peer.connect(remoteAddress);
+ipcMain.handle("chat:setDisplayName", (_event, name: string) => {
+  if (chat === undefined) throw new Error("chat node not initialized");
+  chat.setDisplayName(name);
 });
 
-ipcMain.handle(
-  "peer:send",
-  async (_event, args: { toAgent: AgentId; text: string }) => {
-    if (peer === undefined) {
-      throw new Error("Peer not started");
-    }
-    await peer.sendText(args.toAgent, args.text);
-  },
-);
+ipcMain.handle("chat:joinRoom", async (_event, name: string) => {
+  if (chat === undefined) throw new Error("chat node not initialized");
+  await chat.room.join(name);
+});
+
+ipcMain.handle("chat:leaveRoom", async () => {
+  if (chat === undefined) throw new Error("chat node not initialized");
+  await chat.room.leave();
+});
+
+ipcMain.handle("chat:sendChat", async (_event, body: string) => {
+  if (chat === undefined) throw new Error("chat node not initialized");
+  await chat.room.sendChat(body);
+});
 
 app.whenReady().then(() => {
   void createWindow();
@@ -83,5 +98,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
-  await peer?.shutDown();
+  await chat?.shutDown();
 });

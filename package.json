@@ -16,6 +16,7 @@
     "build:clean": "tsc --build --clean",
     "typecheck": "tsc --build",
     "dev:desktop": "npm run dev -w @peerkit-video-chat/desktop",
+    "dev:relay": "npm run dev -w @peerkit-video-chat/relay",
     "test": "vitest run",
     "test:watch": "vitest"
   },

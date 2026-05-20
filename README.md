@@ -24,7 +24,8 @@ The codebase is laid out as a TypeScript monorepo. The bulk of the application �
 peerkit-video-chat/
 ├── apps/
 │   ├── desktop/         Electron application
-│   └── mobile/          React Native application
+│   ├── mobile/          React Native application
+│   └── relay/           Local PeerKit relay used as rendezvous in development
 ├── packages/
 │   ├── core/            Business logic. Room and call state machines,
 │   │                    signaling protocol over PeerKit messages,
@@ -36,6 +37,29 @@ peerkit-video-chat/
 ```
 
 `apps/desktop` and `apps/mobile` are a thin presentation layer: capture and render UI, plumb permissions, wire up the platform-specific PeerKit transport. The rest of the application lives in `packages/core`.
+
+## Running locally
+
+The desktop app discovers other peers through a PeerKit relay. During development we run a local relay alongside the app.
+
+```sh
+npm install
+npm run build
+
+# Terminal 1 — start the local relay. It prints its dialable address
+# (and a ready-to-paste PEERKIT_RELAY_ADDR=... npm run dev:desktop line).
+npm run dev:relay
+
+# Terminal 2 — start a desktop window, pointing it at the address the relay
+# printed. Run this twice (in two separate terminals) for the two-peer flow.
+PEERKIT_RELAY_ADDR=<address-from-terminal-1> npm run dev:desktop
+```
+
+The desktop app takes its bootstrap relay from the `PEERKIT_RELAY_ADDR`
+environment variable. Point it at any reachable relay multiaddr to use a
+relay other than the local dev one.
+
+In each desktop window: set a display name, type the same room name in both, and start chatting. Roster updates as peers join and leave.
 
 ## See also
 

@@ -1,0 +1,21 @@
+{
+  "name": "@peerkit-video-chat/relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local PeerKit relay used as a rendezvous point during development",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@peerkit/api": "^0.1.0-alpha.9",
+    "@peerkit/peerkit": "^0.1.0-alpha.9",
+    "@peerkit/transport-libp2p-nodejs": "^0.1.0-alpha.9"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
