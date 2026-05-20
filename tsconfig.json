@@ -17,6 +17,7 @@
   "files": [],
   "references": [
     { "path": "packages/core" },
-    { "path": "apps/desktop" }
+    { "path": "apps/desktop" },
+    { "path": "apps/relay" }
   ]
 }
