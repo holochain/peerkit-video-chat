@@ -1,0 +1,20 @@
+{
+  "name": "@peerkit-video-chat/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Platform-agnostic core for the peerkit-video-chat showcase",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@peerkit/api": "^0.1.0-alpha.9",
+    "@peerkit/peerkit": "^0.1.0-alpha.9"
+  }
+}

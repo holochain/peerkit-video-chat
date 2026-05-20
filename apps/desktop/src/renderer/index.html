@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>peerkit-video-chat</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 16px;
+        background: #111;
+        color: #eee;
+      }
+      h1 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0 0 12px;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      input {
+        flex: 1;
+        background: #222;
+        color: #eee;
+        border: 1px solid #333;
+        padding: 6px 8px;
+        font-family: inherit;
+        font-size: 13px;
+      }
+      button {
+        background: #2a5;
+        color: #fff;
+        border: none;
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button:disabled {
+        background: #333;
+        color: #666;
+        cursor: default;
+      }
+      pre {
+        background: #1a1a1a;
+        padding: 8px;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        max-height: 180px;
+        overflow-y: auto;
+      }
+      .self {
+        font-family: monospace;
+        font-size: 11px;
+        color: #888;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>peerkit-video-chat</h1>
+    <div class="self" id="self">Starting peer&hellip;</div>
+    <div class="row" style="margin-top: 12px">
+      <input
+        id="remote-address"
+        placeholder="/ip4/127.0.0.1/tcp/31000 (remote multiaddr)"
+      />
+      <button id="connect-btn" disabled>Connect</button>
+    </div>
+    <div class="row">
+      <input id="to-agent" placeholder="Remote agentId" />
+      <input id="msg" placeholder="Message" />
+      <button id="send-btn" disabled>Send</button>
+    </div>
+    <pre id="log"></pre>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
