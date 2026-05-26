@@ -1,13 +1,14 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, session } from "electron";
 
 import {
   startChatNode,
   type ChatNode,
   type IncomingChat,
   type RoomStateView,
+  type WebRtcSignal,
 } from "@peerkit-video-chat/core";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,6 +33,19 @@ function getRelayAddress(): string {
 }
 
 async function createWindow(): Promise<void> {
+  // Allow microphone (audio only) in the renderer — Electron 20+ denies by default.
+  session.defaultSession.setPermissionCheckHandler(
+    (_wc, permission, _origin, details) =>
+      permission === "media" && details.mediaType === "audio",
+  );
+  session.defaultSession.setPermissionRequestHandler(
+    (_wc, permission, callback, details) => {
+      const mediaTypes =
+        "mediaTypes" in details ? (details.mediaTypes ?? []) : [];
+      callback(permission === "media" && mediaTypes.includes("audio"));
+    },
+  );
+
   mainWindow = new BrowserWindow({
     width: 900,
     height: 640,
@@ -61,6 +75,8 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
     events: {
       onState: (view: RoomStateView) => emit("chat:state", view),
       onChat: (incoming: IncomingChat) => emit("chat:chat", incoming),
+      onSignal: (fromAgent: string, signal: WebRtcSignal) =>
+        emit("rtc:signal", { fromAgent, signal }),
     },
   });
   return { agentId: chat.agentId };
@@ -85,6 +101,14 @@ ipcMain.handle("chat:sendChat", async (_event, body: string) => {
   if (chat === undefined) throw new Error("chat node not initialized");
   await chat.room.sendChat(body);
 });
+
+ipcMain.handle(
+  "rtc:sendSignal",
+  async (_event, toAgent: string, signal: WebRtcSignal) => {
+    if (chat === undefined) throw new Error("chat node not initialized");
+    await chat.sendSignal(toAgent, signal);
+  },
+);
 
 app.whenReady().then(() => {
   void createWindow();

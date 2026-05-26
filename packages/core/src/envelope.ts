@@ -6,6 +6,9 @@ export const MsgType = {
   RoomLeave: 2,
   RoomRoster: 3,
   ChatMsg: 4,
+  WebRtcOffer: 5,
+  WebRtcAnswer: 6,
+  WebRtcIce: 7,
 } as const;
 export type MsgType = (typeof MsgType)[keyof typeof MsgType];
 
@@ -40,7 +43,35 @@ export interface ChatMsg extends EnvelopeBase {
   body: string;
 }
 
-export type Envelope = RoomJoinMsg | RoomLeaveMsg | RoomRosterMsg | ChatMsg;
+// Serializable payload carried over IPC and embedded in WebRTC envelope types.
+export type WebRtcSignal =
+  | { kind: "offer"; sdp: string }
+  | { kind: "answer"; sdp: string }
+  | { kind: "ice"; candidate: string }; // JSON-encoded RTCIceCandidateInit
+
+export interface WebRtcOfferMsg extends EnvelopeBase {
+  type: typeof MsgType.WebRtcOffer;
+  sdp: string;
+}
+
+export interface WebRtcAnswerMsg extends EnvelopeBase {
+  type: typeof MsgType.WebRtcAnswer;
+  sdp: string;
+}
+
+export interface WebRtcIceMsg extends EnvelopeBase {
+  type: typeof MsgType.WebRtcIce;
+  candidate: string;
+}
+
+export type Envelope =
+  | RoomJoinMsg
+  | RoomLeaveMsg
+  | RoomRosterMsg
+  | ChatMsg
+  | WebRtcOfferMsg
+  | WebRtcAnswerMsg
+  | WebRtcIceMsg;
 
 const encoder = new Encoder({ useRecords: false });
 const decoder = new Decoder({ useRecords: false });
@@ -93,6 +124,13 @@ function validate(raw: unknown): Envelope | null {
     case MsgType.ChatMsg:
       if (typeof r["body"] !== "string") return null;
       return r as unknown as ChatMsg;
+    case MsgType.WebRtcOffer:
+    case MsgType.WebRtcAnswer:
+      if (typeof r["sdp"] !== "string") return null;
+      return r as unknown as WebRtcOfferMsg | WebRtcAnswerMsg;
+    case MsgType.WebRtcIce:
+      if (typeof r["candidate"] !== "string") return null;
+      return r as unknown as WebRtcIceMsg;
     default:
       return null;
   }

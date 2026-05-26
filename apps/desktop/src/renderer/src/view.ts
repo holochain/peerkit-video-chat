@@ -1,8 +1,10 @@
 import type { IncomingChat, RoomStateView } from "@peerkit-video-chat/core";
 
 import { els, removeAllChildren } from "./dom.js";
+import { closeAll, closePeer, initiateCall } from "./webrtc.js";
 
-let selfAgentId = "";
+export let selfAgentId = "";
+const knownPeers = new Set<string>();
 
 export function setSelfAgent(agentId: string): void {
   selfAgentId = agentId;
@@ -30,18 +32,43 @@ export function renderState(view: RoomStateView): void {
   if (view.kind === "idle") {
     els.roomLabel.textContent = "not in a room";
     els.leaveBtn.classList.add("hidden");
+    els.muteBtn.classList.add("hidden");
     els.rosterPane.classList.add("hidden");
     els.chatPane.classList.add("hidden");
     els.emptyPane.classList.remove("hidden");
     removeAllChildren(els.rosterList);
     removeAllChildren(els.chatLog);
+    closeAll();
+    knownPeers.clear();
     return;
   }
   els.roomLabel.textContent = view.room;
   els.leaveBtn.classList.remove("hidden");
+  els.muteBtn.classList.remove("hidden");
   els.rosterPane.classList.remove("hidden");
   els.chatPane.classList.remove("hidden");
   els.emptyPane.classList.add("hidden");
+
+  // Reconcile WebRTC peers.
+  const currentIds = new Set(view.members.map((m) => m.agentId));
+  for (const id of knownPeers) {
+    if (!currentIds.has(id)) {
+      closePeer(id);
+      knownPeers.delete(id);
+    }
+  }
+  for (const m of view.members) {
+    if (m.agentId === selfAgentId) continue;
+    if (!knownPeers.has(m.agentId)) {
+      knownPeers.add(m.agentId);
+      // Lower agent ID is the offerer — prevents both sides offering simultaneously.
+      if (selfAgentId < m.agentId) {
+        initiateCall(m.agentId).catch((err: unknown) => {
+          showError(`audio: ${(err as Error).message}`);
+        });
+      }
+    }
+  }
 
   removeAllChildren(els.rosterList);
   for (const m of view.members) {

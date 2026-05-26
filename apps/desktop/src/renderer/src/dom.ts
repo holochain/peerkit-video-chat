@@ -16,6 +16,7 @@ export const els = {
   nameEdit: q<HTMLInputElement>("name-edit"),
   roomLabel: q<HTMLSpanElement>("room-label"),
   leaveBtn: q<HTMLButtonElement>("leave-btn"),
+  muteBtn: q<HTMLButtonElement>("mute-btn"),
 
   rosterPane: q<HTMLElement>("roster-pane"),
   rosterList: q<HTMLUListElement>("roster"),

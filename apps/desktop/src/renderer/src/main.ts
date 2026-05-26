@@ -6,6 +6,7 @@ import {
   setSelfAgent,
   showError,
 } from "./view.js";
+import { handleSignal, setMuted } from "./webrtc.js";
 
 let initialized = false;
 let initializing = false;
@@ -24,6 +25,11 @@ async function init(displayName: string): Promise<void> {
 
     window.app.onState(renderState);
     window.app.onChat(appendChat);
+    window.app.onSignal((fromAgent, signal) => {
+      handleSignal(fromAgent, signal).catch((err: unknown) => {
+        showError(`audio: ${(err as Error).message}`);
+      });
+    });
     initialized = true;
   } catch (err) {
     els.nameError.textContent = (err as Error).message ?? String(err);
@@ -89,4 +95,11 @@ els.chatSend.addEventListener("click", () => {
 
 els.chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") els.chatSend.click();
+});
+
+let muted = false;
+els.muteBtn.addEventListener("click", () => {
+  muted = !muted;
+  setMuted(muted);
+  els.muteBtn.textContent = muted ? "🔇 Unmute" : "🎙 Mute";
 });

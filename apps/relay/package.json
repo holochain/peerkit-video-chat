@@ -11,9 +11,9 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@peerkit/api": "^0.1.0-alpha.9",
-    "@peerkit/peerkit": "^0.1.0-alpha.9",
-    "@peerkit/transport-libp2p-nodejs": "^0.1.0-alpha.9"
+    "@peerkit/api": "^0.1.0-alpha.10",
+    "@peerkit/peerkit": "^0.1.0-alpha.10",
+    "@peerkit/transport-libp2p-nodejs": "^0.1.0-alpha.10"
   },
   "devDependencies": {
     "tsx": "^4.19.0"
