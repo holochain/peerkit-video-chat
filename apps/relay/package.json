@@ -2,7 +2,7 @@
   "name": "@peerkit-video-chat/relay",
   "version": "0.0.0",
   "private": true,
-  "description": "Local PeerKit relay used as a rendezvous point during development",
+  "description": "PeerKit relay server — rendezvous point for peer discovery",
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
