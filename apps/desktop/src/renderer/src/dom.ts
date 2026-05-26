@@ -18,8 +18,8 @@ export const els = {
   leaveBtn: q<HTMLButtonElement>("leave-btn"),
   muteBtn: q<HTMLButtonElement>("mute-btn"),
 
-  rosterPane: q<HTMLElement>("roster-pane"),
-  rosterList: q<HTMLUListElement>("roster"),
+  videoGrid: q<HTMLDivElement>("video-grid"),
+  selfVideo: q<HTMLVideoElement>("self-video"),
 
   emptyPane: q<HTMLDivElement>("empty"),
   roomInput: q<HTMLInputElement>("room-input"),

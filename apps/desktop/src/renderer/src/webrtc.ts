@@ -6,18 +6,120 @@ const ICE_SERVERS: RTCIceServer[] = [
 ];
 
 const peers = new Map<string, RTCPeerConnection>();
-const audioEls = new Map<string, HTMLAudioElement>();
 // ICE candidates that arrived before the offer was processed (RFC 8829 §4.1.19)
 const pendingCandidates = new Map<string, RTCIceCandidateInit[]>();
 // End-of-candidates received before the peer connection existed
 const pendingEoc = new Set<string>();
+
 let localStream: MediaStream | null = null;
+let audioCtx: AudioContext | null = null;
+
+// Cleanup functions for per-agent AnalyserNode loops (keyed by agentId, incl. "self")
+const analyserCleanup = new Map<string, () => void>();
+
+type StreamCallback = (agentId: string, stream: MediaStream | null) => void;
+type SpeakingCallback = (agentId: string, speaking: boolean) => void;
+
+let onRemoteStream: StreamCallback | null = null;
+let onSpeakingChange: SpeakingCallback | null = null;
+
+/** Register callback invoked when a remote peer's stream arrives or is removed. */
+export function setStreamCallback(cb: StreamCallback): void {
+  onRemoteStream = cb;
+}
+
+/** Register callback invoked when any peer's speaking state changes. */
+export function setSpeakingCallback(cb: SpeakingCallback): void {
+  onSpeakingChange = cb;
+}
+
+/** Return the local media stream if already acquired, otherwise null. */
+export function getLocalStream(): MediaStream | null {
+  return localStream;
+}
 
 async function acquireLocalStream(): Promise<MediaStream> {
   if (localStream !== null) return localStream;
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: true,
+    });
+  } catch {
+    // Camera unavailable or permission denied — fall back to audio only.
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  }
   return localStream;
 }
+
+/**
+ * Acquire local media and start speaking detection for the local participant.
+ * Returns the stream so the caller can attach it to a self-preview element.
+ */
+export async function initLocalMedia(selfAgentId: string): Promise<MediaStream> {
+  const stream = await acquireLocalStream();
+  stopSpeakingDetection(selfAgentId);
+  startSpeakingDetection(selfAgentId, stream);
+  return stream;
+}
+
+// ---------------------------------------------------------------------------
+// Speaking detection via AudioContext + AnalyserNode
+// ---------------------------------------------------------------------------
+
+function getAudioCtx(): AudioContext {
+  if (audioCtx === null) audioCtx = new AudioContext();
+  if (audioCtx.state === "suspended") void audioCtx.resume();
+  return audioCtx;
+}
+
+function startSpeakingDetection(agentId: string, stream: MediaStream): void {
+  const ctx = getAudioCtx();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  // Smooth rapidly to reduce flicker without hiding speech bursts.
+  analyser.smoothingTimeConstant = 0.4;
+  source.connect(analyser);
+
+  const buf = new Float32Array(analyser.fftSize);
+  let smoothedRms = 0;
+  let speaking = false;
+  let rafId = 0;
+
+  function tick() {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (const v of buf) sum += v * v;
+    const instantRms = Math.sqrt(sum / buf.length);
+    // Additional smoothing on top of the native smoothingTimeConstant.
+    smoothedRms = smoothedRms * 0.85 + instantRms * 0.15;
+
+    const nowSpeaking = smoothedRms > 0.015;
+    if (nowSpeaking !== speaking) {
+      speaking = nowSpeaking;
+      onSpeakingChange?.(agentId, speaking);
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+
+  rafId = requestAnimationFrame(tick);
+
+  analyserCleanup.set(agentId, () => {
+    cancelAnimationFrame(rafId);
+    source.disconnect();
+    if (speaking) onSpeakingChange?.(agentId, false);
+  });
+}
+
+function stopSpeakingDetection(agentId: string): void {
+  analyserCleanup.get(agentId)?.();
+  analyserCleanup.delete(agentId);
+}
+
+// ---------------------------------------------------------------------------
+// Peer connection management
+// ---------------------------------------------------------------------------
 
 function buildPeerConnection(agentId: string): RTCPeerConnection {
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -34,14 +136,17 @@ function buildPeerConnection(agentId: string): RTCPeerConnection {
   };
 
   pc.ontrack = (ev) => {
-    let audio = audioEls.get(agentId);
-    if (audio === undefined) {
-      audio = document.createElement("audio");
-      audio.autoplay = true;
-      document.getElementById("audio-sink")?.appendChild(audio);
-      audioEls.set(agentId, audio);
+    const stream = ev.streams[0];
+    if (stream === undefined) return;
+
+    // Notify view layer — it attaches the stream to the peer's video tile.
+    onRemoteStream?.(agentId, stream);
+
+    // Start speaking detection when the audio track arrives.
+    if (ev.track.kind === "audio") {
+      stopSpeakingDetection(agentId);
+      startSpeakingDetection(agentId, stream);
     }
-    audio.srcObject = ev.streams[0] ?? null;
   };
 
   pc.onconnectionstatechange = () => {
@@ -151,12 +256,8 @@ export function closePeer(agentId: string): void {
   peers.delete(agentId);
   pendingCandidates.delete(agentId);
   pendingEoc.delete(agentId);
-  const audio = audioEls.get(agentId);
-  if (audio !== undefined) {
-    audio.srcObject = null;
-    audio.remove();
-    audioEls.delete(agentId);
-  }
+  stopSpeakingDetection(agentId);
+  onRemoteStream?.(agentId, null);
 }
 
 export function closeAll(): void {
@@ -165,6 +266,10 @@ export function closeAll(): void {
   }
   pendingCandidates.clear();
   pendingEoc.clear();
+  // Stop all remaining analyser nodes (includes local speaking detection).
+  for (const agentId of [...analyserCleanup.keys()]) {
+    stopSpeakingDetection(agentId);
+  }
   localStream?.getTracks().forEach((t) => t.stop());
   localStream = null;
 }

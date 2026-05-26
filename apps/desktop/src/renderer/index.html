@@ -58,27 +58,78 @@
         display: flex;
         min-height: 0;
       }
-      aside {
-        width: 220px;
-        background: #161616;
-        border-right: 1px solid #2a2a2a;
+
+      /* ---------------------------------------------------------------
+         Video grid — fills available width; chat panel sits to its right.
+         When NOT in a room (.in-room absent) the grid is hidden and the
+         side panel stretches full-width to show the empty/join state.
+      --------------------------------------------------------------- */
+      .video-grid {
+        flex: 1;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        grid-auto-rows: min-content;
+        gap: 8px;
         padding: 12px;
+        align-content: start;
         overflow-y: auto;
+        background: #0d0d0d;
+        min-width: 0;
       }
-      aside h2 {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: #888;
-        margin: 0 0 8px;
+
+      /* Individual participant tile */
+      .tile {
+        position: relative;
+        background: #1a1a1a;
+        border-radius: 8px;
+        overflow: hidden;
+        aspect-ratio: 16 / 9;
+        border: 2px solid transparent;
+        transition: border-color 0.1s, box-shadow 0.1s;
       }
-      aside ul { list-style: none; padding: 0; margin: 0; }
-      aside li {
-        padding: 6px 0;
-        font-size: 13px;
-        border-bottom: 1px solid #222;
+      .tile.speaking {
+        border-color: #2c6;
+        box-shadow: 0 0 0 2px rgba(34, 204, 102, 0.35);
       }
-      aside li .id { font-family: monospace; font-size: 10px; color: #666; display: block; }
+      .tile video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        background: #000;
+      }
+      /* Mirror the self-preview — natural for looking at yourself */
+      .tile.self video {
+        transform: scaleX(-1);
+      }
+      .tile-name {
+        position: absolute;
+        bottom: 8px;
+        left: 8px;
+        background: rgba(0, 0, 0, 0.65);
+        color: #eee;
+        font-size: 12px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        pointer-events: none;
+      }
+
+      /* ---------------------------------------------------------------
+         Side panel — chat when in-room, join UI when idle.
+         Width is fixed when the video grid is visible; full-width when not.
+      --------------------------------------------------------------- */
+      .side-panel {
+        flex: 1;               /* full width when video grid is hidden */
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+      }
+      main.in-room .side-panel {
+        flex: 0 0 280px;
+        border-left: 1px solid #2a2a2a;
+      }
+
       .empty-state {
         flex: 1;
         display: flex;
@@ -89,11 +140,12 @@
         color: #888;
       }
       .empty-state input { width: 280px; }
+
       .chat-pane {
         flex: 1;
         display: flex;
         flex-direction: column;
-        min-width: 0;
+        min-height: 0;
       }
       .chat-log {
         flex: 1;
@@ -170,15 +222,17 @@
       <button id="leave-btn" class="secondary hidden">Leave</button>
       <button id="mute-btn" class="secondary hidden">🎙 Mute</button>
     </header>
-    <div id="audio-sink" style="display:none"></div>
 
     <main class="hidden" id="app-main">
-      <aside id="roster-pane" class="hidden">
-        <h2>In the room</h2>
-        <ul id="roster"></ul>
-      </aside>
+      <!-- Video grid: self-tile is always present; peer tiles are added by JS -->
+      <div id="video-grid" class="video-grid hidden">
+        <div id="self-tile" class="tile self">
+          <video id="self-video" autoplay muted playsinline></video>
+          <div class="tile-name">You</div>
+        </div>
+      </div>
 
-      <div class="chat-pane">
+      <div class="side-panel">
         <div id="empty" class="empty-state">
           <div>Join a room to start chatting.</div>
           <div style="display: flex; gap: 8px;">

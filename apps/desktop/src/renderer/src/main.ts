@@ -2,11 +2,15 @@ import { els } from "./dom.js";
 import {
   appendChat,
   clearError,
+  initViewCallbacks,
   renderState,
   setSelfAgent,
   showError,
 } from "./view.js";
 import { handleSignal, setMuted } from "./webrtc.js";
+
+// Wire stream + speaking callbacks once at module load (before any user action).
+initViewCallbacks();
 
 let initialized = false;
 let initializing = false;
@@ -27,7 +31,7 @@ async function init(displayName: string): Promise<void> {
     window.app.onChat(appendChat);
     window.app.onSignal((fromAgent, signal) => {
       handleSignal(fromAgent, signal).catch((err: unknown) => {
-        showError(`audio: ${(err as Error).message}`);
+        showError(`call: ${(err as Error).message}`);
       });
     });
     initialized = true;
