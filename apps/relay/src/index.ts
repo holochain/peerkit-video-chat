@@ -32,7 +32,7 @@ async function main(): Promise<void> {
 
   process.stdout.write(
     `peerkit relay listening\n  address: ${fullAddress}\n` +
-      `  start a desktop window with: PEERKIT_RELAY_ADDR=${fullAddress} npm run dev:desktop\n`,
+      `  start a desktop window with: PEERKIT_RELAY_ADDR=${LISTEN_ADDR} npm run dev:desktop\n`,
   );
 
   const shutdown = async (signal: string): Promise<void> => {
