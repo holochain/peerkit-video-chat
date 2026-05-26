@@ -6,6 +6,7 @@ export type {
   RoomRosterMsg,
   ChatMsg,
   RosterEntry,
+  WebRtcSignal,
 } from "./envelope.js";
 
 export { Room, normalizeRoomName } from "./room.js";

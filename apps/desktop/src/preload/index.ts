@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   IncomingChat,
   RoomStateView,
+  WebRtcSignal,
 } from "@peerkit-video-chat/core";
 
 const api = {
@@ -31,12 +32,30 @@ const api = {
       ipcRenderer.off("chat:chat", listener);
     };
   },
+
+  sendSignal: (toAgent: string, signal: WebRtcSignal): Promise<void> =>
+    ipcRenderer.invoke("rtc:sendSignal", toAgent, signal),
+
+  onSignal: (
+    handler: (fromAgent: string, signal: WebRtcSignal) => void,
+  ): (() => void) => {
+    const listener = (
+      _event: unknown,
+      payload: { fromAgent: string; signal: WebRtcSignal },
+    ): void => handler(payload.fromAgent, payload.signal);
+    ipcRenderer.on("rtc:signal", listener);
+    return () => {
+      ipcRenderer.off("rtc:signal", listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("app", api);
 
+export type AppApi = typeof api;
+
 declare global {
   interface Window {
-    app: typeof api;
+    app: AppApi;
   }
 }

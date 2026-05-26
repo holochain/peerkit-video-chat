@@ -1,4 +1,5 @@
 import type { AgentId, RelayAddress } from "@peerkit/api";
+import type { WebRtcSignal } from "./envelope.js";
 import { PeerkitNodeBuilder, type PeerkitNode } from "@peerkit/peerkit";
 
 import { decode, encode, type Envelope } from "./envelope.js";
@@ -15,6 +16,7 @@ export interface ChatNode {
   readonly agentId: AgentId;
   readonly room: Room;
   setDisplayName(name: string): void;
+  sendSignal(toAgent: AgentId, signal: WebRtcSignal): Promise<void>;
   shutDown(): Promise<void>;
 }
 
@@ -118,6 +120,9 @@ export async function startChatNode(
     room,
     setDisplayName(name: string) {
       room.setDisplayName(name);
+    },
+    async sendSignal(toAgent: AgentId, signal: WebRtcSignal) {
+      await room.sendSignal(toAgent, signal);
     },
     async shutDown() {
       try {

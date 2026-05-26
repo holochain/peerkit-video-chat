@@ -8,6 +8,10 @@ import {
   type RoomLeaveMsg,
   type RoomRosterMsg,
   type RosterEntry,
+  type WebRtcIceMsg,
+  type WebRtcOfferMsg,
+  type WebRtcAnswerMsg,
+  type WebRtcSignal,
 } from "./envelope.js";
 
 export type RoomStateView =
@@ -31,6 +35,7 @@ export interface RoomTransport {
 export interface RoomEvents {
   onState(view: RoomStateView): void;
   onChat(chat: IncomingChat): void;
+  onSignal(fromAgent: AgentId, signal: WebRtcSignal): void;
 }
 
 export function normalizeRoomName(name: string): string {
@@ -140,7 +145,37 @@ export class Room {
       case MsgType.ChatMsg:
         this.handleChat(env);
         break;
+      case MsgType.WebRtcOffer:
+        this.events.onSignal(env.from, { kind: "offer", sdp: env.sdp });
+        break;
+      case MsgType.WebRtcAnswer:
+        this.events.onSignal(env.from, { kind: "answer", sdp: env.sdp });
+        break;
+      case MsgType.WebRtcIce:
+        this.events.onSignal(env.from, { kind: "ice", candidate: env.candidate });
+        break;
     }
+  }
+
+  async sendSignal(toAgent: AgentId, signal: WebRtcSignal): Promise<void> {
+    if (this.state.kind !== "inRoom") {
+      throw new Error("not in a room");
+    }
+    const base = {
+      v: 1 as const,
+      from: this.transport.agentId,
+      room: this.state.room,
+      ts: Date.now(),
+    };
+    let env: WebRtcOfferMsg | WebRtcAnswerMsg | WebRtcIceMsg;
+    if (signal.kind === "offer") {
+      env = { ...base, type: MsgType.WebRtcOffer, sdp: signal.sdp };
+    } else if (signal.kind === "answer") {
+      env = { ...base, type: MsgType.WebRtcAnswer, sdp: signal.sdp };
+    } else {
+      env = { ...base, type: MsgType.WebRtcIce, candidate: signal.candidate };
+    }
+    await this.transport.sendTo(toAgent, env);
   }
 
   reannounce(): void {

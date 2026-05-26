@@ -18,7 +18,7 @@ if (ipVersion === 0) {
   process.exit(1);
 }
 
-const LISTEN_ADDR = `/ip${ipVersion}/${RELAY_HOST}/tcp/${parsedPort}`;
+const LISTEN_ADDR = `/ip${ipVersion}/${RELAY_HOST}/tcp/${parsedPort}/ws`;
 
 async function main(): Promise<void> {
   const relay = await new PeerkitRelayBuilder(async () => true)
