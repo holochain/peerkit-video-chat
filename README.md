@@ -89,16 +89,15 @@ The relay binds to `0.0.0.0:9000` by default in production. Override with env va
 | `RELAY_HOST` | `127.0.0.1` | Bind address (`0.0.0.0` to accept external connections) |
 | `RELAY_PORT` | `9000` | TCP port |
 
-On start the relay prints its full multiaddr:
+On start the relay prints its address and a ready-to-paste client command:
 
 ```
 peerkit relay listening
-  address: /ip4/0.0.0.0/tcp/9000/p2p/<peer-id>
+  address: /ip4/0.0.0.0/tcp/9000/ws/p2p/<peer-id>
+  start a desktop window with: PEERKIT_RELAY_ADDR=/ip4/0.0.0.0/tcp/9000/ws npm run dev:desktop
 ```
 
-Replace `0.0.0.0` with the server's public IP and share that address as `PEERKIT_RELAY_ADDR` for clients to connect.
-
-> **Note:** The peer ID changes on every restart. Extract it from the startup log and redistribute after each redeploy.
+Replace `0.0.0.0` with the server's public IP when sharing `PEERKIT_RELAY_ADDR` with clients. The peer ID in the address line is informational; clients only need the transport portion (`/ip4/<host>/tcp/<port>/ws`).
 
 ## See also
 
