@@ -25,7 +25,7 @@ peerkit-video-chat/
 ├── apps/
 │   ├── desktop/         Electron application
 │   ├── mobile/          React Native application
-│   └── relay/           Local PeerKit relay used as rendezvous in development
+│   └── relay/           PeerKit relay — rendezvous point for peer discovery
 ├── packages/
 │   ├── core/            Business logic. Room and call state machines,
 │   │                    signaling protocol over PeerKit messages,
@@ -60,6 +60,45 @@ environment variable. Point it at any reachable relay multiaddr to use a
 relay other than the local dev one.
 
 In each desktop window: set a display name, type the same room name in both, and start chatting. Roster updates as peers join and leave.
+
+## Deploying the relay
+
+For shared testing, deploy the relay to a server with a public IP and direct TCP access (a VPS — not a PaaS HTTP proxy).
+
+**Build**
+
+```sh
+npm ci
+npm run build -w @peerkit-video-chat/relay
+```
+
+**Run with pm2**
+
+```sh
+npm install -g pm2
+cd apps/relay
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup   # follow the printed instruction to survive reboots
+```
+
+The relay binds to `0.0.0.0:9000` by default in production. Override with env vars:
+
+| Variable | Default | Description |
+|---|---|---|
+| `RELAY_HOST` | `127.0.0.1` | Bind address (`0.0.0.0` to accept external connections) |
+| `RELAY_PORT` | `9000` | TCP port |
+
+On start the relay prints its full multiaddr:
+
+```
+peerkit relay listening
+  address: /ip4/0.0.0.0/tcp/9000/p2p/<peer-id>
+```
+
+Replace `0.0.0.0` with the server's public IP and share that address as `PEERKIT_RELAY_ADDR` for clients to connect.
+
+> **Note:** The peer ID changes on every restart. Extract it from the startup log and redistribute after each redeploy.
 
 ## See also
 
