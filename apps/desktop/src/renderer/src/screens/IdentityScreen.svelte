@@ -29,7 +29,7 @@
     <h1 class="font-display">Pick a name to show your peers.</h1>
     <div class="identity-sub">
       Your username is broadcast over peerkit so peers can recognize you.
-      It doesn't have to be unique — your agent identity is unique and shown below.
+      It doesn't have to be unique — your agent identity is unique and shown in the app.
     </div>
 
     <label class="field-label" for="username-input">Username</label>
@@ -44,16 +44,6 @@
       spellcheck={false}
       maxlength={32}
     />
-
-    <div class="identity-key">
-      <div class="identity-key-row">
-        <span class="field-label" style="margin:0">Your agent identity</span>
-      </div>
-      <div class="identity-key-val">Your key will be generated when you continue.</div>
-      <div style="font-size:11.5px;color:var(--fg-2);margin-top:8px;line-height:1.5">
-        Your agent identity is a cryptographic identity that is created locally and owned by you.
-      </div>
-    </div>
 
     <div class="identity-actions">
       <button
