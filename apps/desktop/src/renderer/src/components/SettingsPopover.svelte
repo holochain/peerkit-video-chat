@@ -9,24 +9,59 @@
     onClose: () => void;
   } = $props();
 
-  const DEVICE_OPTIONS = {
-    camera: ['FaceTime HD Camera (built-in)', 'Logitech C920', 'OBS Virtual Camera'],
-    microphone: ['MacBook Pro Microphone', 'AirPods Pro', 'Shure MV7'],
-    speaker: ['MacBook Pro Speakers', 'AirPods Pro', 'External Display Audio'],
-  };
+  type DeviceKind = 'camera' | 'microphone' | 'speaker';
+  interface DeviceEntry { id: string; label: string; }
+
+  let availDevices = $state<Record<DeviceKind, DeviceEntry[]>>({
+    camera: [],
+    microphone: [],
+    speaker: [],
+  });
+
+  let selectedIds = $state<Record<DeviceKind, string>>({
+    camera: localStorage.getItem('pkvc:dev:camera') ?? '',
+    microphone: localStorage.getItem('pkvc:dev:microphone') ?? '',
+    speaker: localStorage.getItem('pkvc:dev:speaker') ?? '',
+  });
 
   let popEl = $state<HTMLDivElement | null>(null);
 
-  let devices = $state({
-    camera: localStorage.getItem('pkvc:dev:camera') || DEVICE_OPTIONS.camera[0],
-    microphone: localStorage.getItem('pkvc:dev:microphone') || DEVICE_OPTIONS.microphone[0],
-    speaker: localStorage.getItem('pkvc:dev:speaker') || DEVICE_OPTIONS.speaker[0],
-  });
-
-  function setDevice(key: 'camera' | 'microphone' | 'speaker', value: string) {
-    devices[key] = value;
-    localStorage.setItem('pkvc:dev:' + key, value);
+  function setDevice(kind: DeviceKind, id: string) {
+    selectedIds[kind] = id;
+    localStorage.setItem('pkvc:dev:' + kind, id);
   }
+
+  function refreshDevices() {
+    navigator.mediaDevices?.enumerateDevices().then((list) => {
+      availDevices = {
+        camera: list
+          .filter((d) => d.kind === 'videoinput')
+          .map((d, i) => ({ id: d.deviceId, label: d.label || `Camera ${i + 1}` })),
+        microphone: list
+          .filter((d) => d.kind === 'audioinput')
+          .map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` })),
+        speaker: list
+          .filter((d) => d.kind === 'audiooutput')
+          .map((d, i) => ({ id: d.deviceId, label: d.label || `Speaker ${i + 1}` })),
+      };
+      // pick first as default if nothing stored yet
+      for (const kind of ['camera', 'microphone', 'speaker'] as const) {
+        if (!selectedIds[kind] && availDevices[kind][0]) {
+          setDevice(kind, availDevices[kind][0].id);
+        }
+      }
+    }).catch(() => {
+      // mediaDevices unavailable (no permission yet; labels empty until granted)
+    });
+  }
+
+  $effect(() => {
+    refreshDevices();
+    navigator.mediaDevices?.addEventListener('devicechange', refreshDevices);
+    return () => {
+      navigator.mediaDevices?.removeEventListener('devicechange', refreshDevices);
+    };
+  });
 
   $effect(() => {
     const onDown = (e: MouseEvent) => {
@@ -55,41 +90,29 @@
   </div>
   <div class="settings-sep"></div>
   <div class="settings-pop-title">Devices</div>
-  <label class="settings-row">
-    <span class="settings-row-label">Camera</span>
-    <select
-      class="settings-row-select"
-      value={devices.camera}
-      onchange={(e) => setDevice('camera', (e.target as HTMLSelectElement).value)}
-    >
-      {#each DEVICE_OPTIONS.camera as opt}
-        <option value={opt}>{opt}</option>
-      {/each}
-    </select>
-  </label>
-  <label class="settings-row">
-    <span class="settings-row-label">Microphone</span>
-    <select
-      class="settings-row-select"
-      value={devices.microphone}
-      onchange={(e) => setDevice('microphone', (e.target as HTMLSelectElement).value)}
-    >
-      {#each DEVICE_OPTIONS.microphone as opt}
-        <option value={opt}>{opt}</option>
-      {/each}
-    </select>
-  </label>
-  <label class="settings-row">
-    <span class="settings-row-label">Speaker</span>
-    <select
-      class="settings-row-select"
-      value={devices.speaker}
-      onchange={(e) => setDevice('speaker', (e.target as HTMLSelectElement).value)}
-    >
-      {#each DEVICE_OPTIONS.speaker as opt}
-        <option value={opt}>{opt}</option>
-      {/each}
-    </select>
-  </label>
+
+  {#each (['camera', 'microphone', 'speaker'] as const) as kind}
+    {@const entries = availDevices[kind]}
+    {@const kindLabel = kind[0].toUpperCase() + kind.slice(1)}
+    <label class="settings-row">
+      <span class="settings-row-label">{kindLabel}</span>
+      {#if entries.length === 0}
+        <span style="color:var(--fg-3);font-size:12px;flex:1;text-align:right;padding-right:4px">
+          No devices found
+        </span>
+      {:else}
+        <select
+          class="settings-row-select"
+          value={selectedIds[kind]}
+          onchange={(e) => setDevice(kind, (e.target as HTMLSelectElement).value)}
+        >
+          {#each entries as d (d.id)}
+            <option value={d.id}>{d.label}</option>
+          {/each}
+        </select>
+      {/if}
+    </label>
+  {/each}
+
   <div class="settings-foot">Device settings apply to the next room you join.</div>
 </div>

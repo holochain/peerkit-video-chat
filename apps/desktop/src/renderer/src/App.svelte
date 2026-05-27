@@ -14,6 +14,8 @@
   } from './webrtc.js';
   import { remoteStreams, speakingPeers } from './lib/stores.js';
 
+  declare const __APP_VERSION__: string;
+
   type Screen = 'identity' | 'lobby' | 'prejoin' | 'call';
   type ThemePref = 'system' | 'light' | 'dark';
   type ThemeResolved = 'dark' | 'light';
@@ -41,6 +43,7 @@
   let screen = $state<Screen>('identity');
   let selfName = $state('');
   let selfAgentId = $state('');
+  let relayAddr = $state('');
   let currentRoom = $state<string | null>(null);
   let joinTime = $state(0);
   let selfMic = $state(true);
@@ -136,6 +139,8 @@
     });
 
     const unsubChat = window.app.onChat((incoming) => {
+      // skip echo of own messages — we add them optimistically in onSendChat
+      if (incoming.from === selfAgentId) return;
       chatMessages = [
         ...chatMessages,
         {
@@ -169,6 +174,7 @@
     try {
       const result = await window.app.init(name);
       selfAgentId = result.agentId;
+      relayAddr = result.relayAddr;
     } catch (err) {
       console.error('Failed to init chat node:', err);
       // Use a fallback placeholder agentId so UI still works
@@ -264,6 +270,7 @@
     <Topbar
       {selfName}
       {selfAgentId}
+      {relayAddr}
       {themePref}
       {onSetTheme}
     />
@@ -276,6 +283,7 @@
         {selfName}
         {savedRooms}
         {activeRooms}
+        appVersion={__APP_VERSION__}
         onJoin={onJoinRoom}
         onCreate={onCreateRoom}
         {onRemoveSaved}

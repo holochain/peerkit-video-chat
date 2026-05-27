@@ -2,18 +2,23 @@
   import IdentityBadge from './IdentityBadge.svelte';
   import IdentityPopover from './IdentityPopover.svelte';
   import SettingsPopover from './SettingsPopover.svelte';
+  import { shortRelayAddr } from '../lib/helpers.js';
 
   let {
     selfName,
     selfAgentId,
+    relayAddr,
     themePref,
     onSetTheme,
   }: {
     selfName: string;
     selfAgentId: string;
+    relayAddr: string;
     themePref: 'system' | 'light' | 'dark';
     onSetTheme: (pref: 'system' | 'light' | 'dark') => void;
   } = $props();
+
+  const relayDisplay = $derived(relayAddr ? shortRelayAddr(relayAddr) : '…');
 
   let settingsOpen = $state(false);
   let idOpen = $state(false);
@@ -40,8 +45,12 @@
   <div class="topbar-spacer"></div>
 
   <div class="net-status">
-    <span class="pulse"></span>
-    <span>connected · disc.peerkit.dev</span>
+    <span class="pulse" class:pulse--off={!relayAddr}></span>
+    {#if relayAddr}
+      <span>connected · {relayDisplay}</span>
+    {:else}
+      <span>disconnected</span>
+    {/if}
   </div>
 
   <div style="position:relative">
