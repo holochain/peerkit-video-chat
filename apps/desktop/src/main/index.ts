@@ -33,16 +33,13 @@ function getRelayAddress(): string {
 }
 
 async function createWindow(): Promise<void> {
-  // Allow microphone (audio only) in the renderer — Electron 20+ denies by default.
+  // Allow audio and video media in the renderer — Electron 20+ denies by default.
   session.defaultSession.setPermissionCheckHandler(
-    (_wc, permission, _origin, details) =>
-      permission === "media" && details.mediaType === "audio",
+    (_wc, permission) => permission === "media",
   );
   session.defaultSession.setPermissionRequestHandler(
-    (_wc, permission, callback, details) => {
-      const mediaTypes =
-        "mediaTypes" in details ? (details.mediaTypes ?? []) : [];
-      callback(permission === "media" && mediaTypes.includes("audio"));
+    (_wc, permission, callback) => {
+      callback(permission === "media");
     },
   );
 

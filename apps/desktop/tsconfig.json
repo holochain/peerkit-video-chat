@@ -7,5 +7,6 @@
     "lib": ["es2023", "dom"]
   },
   "include": ["src/**/*"],
+  "exclude": ["src/renderer/**/*"],
   "references": [{ "path": "../../packages/core" }]
 }
