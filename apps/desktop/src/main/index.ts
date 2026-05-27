@@ -7,6 +7,7 @@ import {
   startChatNode,
   type ChatNode,
   type IncomingChat,
+  type NetworkRoomEntry,
   type RoomStateView,
   type WebRtcSignal,
 } from "@peerkit-video-chat/core";
@@ -75,6 +76,7 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
       onSignal: (fromAgent: string, signal: WebRtcSignal) =>
         emit("rtc:signal", { fromAgent, signal }),
     },
+    onNetworkRooms: (rooms: NetworkRoomEntry[]) => emit("chat:networkRooms", rooms),
   });
   return { agentId: chat.agentId };
 });
