@@ -17,6 +17,9 @@
     "svelte": "^5.0.0"
   },
   "devDependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/space-grotesk": "^5.2.10",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
     "electron": "^42.0.0",
     "electron-vite": "^5.0.0",
