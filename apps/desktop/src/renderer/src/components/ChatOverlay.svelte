@@ -63,8 +63,10 @@
   class="chat-overlay"
   data-size={size}
   onclick={(e) => e.stopPropagation()}
+  onkeydown={(e) => e.stopPropagation()}
   role="dialog"
   aria-label="Room chat"
+  tabindex="-1"
 >
   <div class="chat-head">
     <div>
