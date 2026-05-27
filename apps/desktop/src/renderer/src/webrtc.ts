@@ -279,3 +279,9 @@ export function setMuted(muted: boolean): void {
     t.enabled = !muted;
   });
 }
+
+export function setCamMuted(muted: boolean): void {
+  localStream?.getVideoTracks().forEach((t) => {
+    t.enabled = !muted;
+  });
+}
