@@ -176,7 +176,6 @@
         {@const hasCam = isSelf ? selfCam : ($remoteStreams.has(tile.agentId) && $remoteStreams.get(tile.agentId)!.getVideoTracks().length > 0)}
         <div
           class="tile {speaking ? 'speaking' : ''}"
-          data-indicator="wave"
         >
           <div class="tile-content {(isSelf && !selfCam) ? 'cam-off' : (!isSelf && !hasCam) ? 'cam-off' : ''}">
             {#if isSelf && selfCam}
@@ -200,8 +199,6 @@
           </div>
 
           <!-- Speaking indicators -->
-          <div class="tile-speak-ring"></div>
-          <div class="tile-speak-glow"></div>
           <div class="tile-speak-wave">
             <svg class="wave-svg" viewBox="0 0 400 40" preserveAspectRatio="none" aria-hidden="true">
               <path class="wave-back"  d="M-50 22 Q-25 14 0 22 T50 22 T100 22 T150 22 T200 22 T250 22 T300 22 T350 22 T400 22 T450 22 L450 40 L-50 40 Z" />
