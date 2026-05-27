@@ -45,9 +45,15 @@
   let joinTime = $state(0);
   let selfMic = $state(true);
   let selfCam = $state(true);
+  interface ActiveRoom {
+    name: string;
+    members: Array<{ agentId: string; displayName: string }>;
+  }
+
   let roomMembers = $state<RoomMember[]>([]);
   let chatMessages = $state<ChatMessage[]>([]);
   let savedRooms = $state<SavedRoom[]>(loadSavedRooms());
+  let activeRooms = $state<ActiveRoom[]>([]);
 
   // Theme
   let themePref = $state<ThemePref>(
@@ -115,10 +121,18 @@
 
   $effect(() => {
     const unsubState = window.app.onState((view) => {
-      roomMembers = view.members.map(m => ({
-        agentId: m.agentId,
-        displayName: m.displayName,
-      }));
+      if (view.kind === 'inRoom') {
+        roomMembers = view.members.map(m => ({
+          agentId: m.agentId,
+          displayName: m.displayName,
+        }));
+      } else {
+        roomMembers = [];
+      }
+    });
+
+    const unsubNetworkRooms = window.app.onNetworkRooms((rooms) => {
+      activeRooms = rooms;
     });
 
     const unsubChat = window.app.onChat((incoming) => {
@@ -142,6 +156,7 @@
 
     return () => {
       unsubState();
+      unsubNetworkRooms();
       unsubChat();
       unsubSignal();
     };
@@ -260,6 +275,7 @@
       <LobbyScreen
         {selfName}
         {savedRooms}
+        {activeRooms}
         onJoin={onJoinRoom}
         onCreate={onCreateRoom}
         {onRemoveSaved}
@@ -271,7 +287,7 @@
         {currentRoom}
         {selfMic}
         {selfCam}
-        activeMembers={roomMembers}
+        activeMembers={activeRooms.find(r => r.name === currentRoom)?.members ?? []}
         onToggleAudio={onToggleMic}
         onToggleVideo={onToggleCam}
         onJoin={onConfirmJoin}
