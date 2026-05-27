@@ -16,6 +16,7 @@
     selfName,
     savedRooms,
     activeRooms = [],
+    appVersion,
     onJoin,
     onCreate,
     onRemoveSaved,
@@ -23,10 +24,17 @@
     selfName: string;
     savedRooms: SavedRoom[];
     activeRooms?: ActiveRoom[];
+    appVersion: string;
     onJoin: (roomName: string) => void;
     onCreate: (roomName: string) => void;
     onRemoveSaved: (roomName: string) => void;
   } = $props();
+
+  function openExternal(url: string) {
+    window.app.openExternal(url).catch(() => {
+      window.open(url, '_blank');
+    });
+  }
 
   let draft = $state('');
 
@@ -229,15 +237,12 @@
 
       <div class="lobby-footer">
         <!-- svelte-ignore a11y_invalid_attribute -->
-        <a href="#" onclick={(e) => e.preventDefault()}>peerkit.dev</a>
+        <a href="#" onclick={(e) => { e.preventDefault(); openExternal('https://peerkit.dev'); }}>peerkit.dev</a>
         <span class="dot">·</span>
         <!-- svelte-ignore a11y_invalid_attribute -->
-        <a href="#" onclick={(e) => e.preventDefault()}>Report an issue</a>
-        <span class="dot">·</span>
-        <!-- svelte-ignore a11y_invalid_attribute -->
-        <a href="#" onclick={(e) => e.preventDefault()}>What's new</a>
+        <a href="#" onclick={(e) => { e.preventDefault(); openExternal('https://github.com/holochain/peerkit-video-chat/issues/new'); }}>Report an issue</a>
         <span style="flex:1"></span>
-        <span class="ver">v0.4.2</span>
+        <span class="ver">v{appVersion}</span>
       </div>
     </div>
   </div>

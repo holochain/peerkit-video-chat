@@ -8,8 +8,10 @@ import type {
 } from "@peerkit-video-chat/core";
 
 const api = {
-  init: (displayName: string): Promise<{ agentId: string }> =>
+  init: (displayName: string): Promise<{ agentId: string; relayAddr: string }> =>
     ipcRenderer.invoke("chat:init", displayName),
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke("app:openExternal", url),
   setDisplayName: (name: string): Promise<void> =>
     ipcRenderer.invoke("chat:setDisplayName", name),
   joinRoom: (name: string): Promise<void> =>

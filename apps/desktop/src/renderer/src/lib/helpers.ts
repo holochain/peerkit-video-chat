@@ -31,6 +31,16 @@ export function formatRelative(ts: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/**
+ * Extracts a readable host:port from a multiaddr.
+ * "/ip4/127.0.0.1/tcp/9000/ws/p2p/…" → "127.0.0.1:9000"
+ */
+export function shortRelayAddr(addr: string): string {
+  const m = addr.match(/\/(ip4|ip6|dns6?|dns4?|dns)\/([\w.:-]+)\/tcp\/(\d+)/);
+  if (m) return `${m[2]}:${m[3]}`;
+  return addr.length > 40 ? addr.slice(0, 40) + '…' : addr;
+}
+
 /** Generates initials from a name: "MR" from "mira" or "Maria R" */
 export function makeInitials(name: string): string {
   const parts = name.trim().split(/[\s_\-.]+/).filter(Boolean);

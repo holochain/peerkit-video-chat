@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, ipcMain, session, shell } from "electron";
 
 import {
   startChatNode,
@@ -45,8 +45,10 @@ async function createWindow(): Promise<void> {
   );
 
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 640,
+    width: 1100,
+    height: 760,
+    minWidth: 800,
+    minHeight: 600,
     title: "peerkit-video-chat (showcase)",
     webPreferences: {
       preload: resolve(__dirname, "../preload/index.js"),
@@ -78,7 +80,7 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
     },
     onNetworkRooms: (rooms: NetworkRoomEntry[]) => emit("chat:networkRooms", rooms),
   });
-  return { agentId: chat.agentId };
+  return { agentId: chat.agentId, relayAddr: relayAddress };
 });
 
 ipcMain.handle("chat:setDisplayName", (_event, name: string) => {
@@ -118,6 +120,14 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+ipcMain.handle("app:openExternal", async (_event, url: string) => {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Blocked non-http(s) URL: ${parsed.protocol}`);
+  }
+  await shell.openExternal(url);
 });
 
 app.on("before-quit", async () => {
