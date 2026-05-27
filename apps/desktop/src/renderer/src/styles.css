@@ -1210,50 +1210,6 @@ h1, h2, h3 {
 .tile-state .badge.off { background: rgba(196, 99, 77, 0.85); color: white; }
 
 /* Speaking indicators */
-.tile-speak-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--rad-2);
-  pointer-events: none;
-  z-index: 3;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.tile-speak-ring::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  border: 2px dashed var(--accent);
-  animation: spin 8s linear infinite;
-}
-.tile-speak-ring::after {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border-radius: calc(var(--rad-2) - 3px);
-  box-shadow: 0 0 0 1px var(--accent) inset;
-}
-.tile.speaking[data-indicator="ring"] .tile-speak-ring { opacity: 1; }
-
-.tile-speak-glow {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--rad-2);
-  pointer-events: none;
-  z-index: 3;
-  opacity: 0;
-  transition: opacity 0.2s;
-  box-shadow:
-    0 0 0 2px var(--accent) inset,
-    0 0 24px 4px var(--accent-tint);
-}
-.tile.speaking[data-indicator="glow"] .tile-speak-glow { opacity: 1; animation: glow 1.6s ease-in-out infinite; }
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 0 2px var(--accent) inset, 0 0 14px 2px var(--accent-tint); }
-  50%      { box-shadow: 0 0 0 2px var(--accent) inset, 0 0 28px 8px var(--accent-tint); }
-}
-
 .tile-speak-wave {
   position: absolute;
   left: 0; right: 0; bottom: 0;
@@ -1267,7 +1223,7 @@ h1, h2, h3 {
   mask-image: linear-gradient(180deg, transparent 0%, black 28%, black 100%);
   -webkit-mask-image: linear-gradient(180deg, transparent 0%, black 28%, black 100%);
 }
-.tile.speaking[data-indicator="wave"] .tile-speak-wave { opacity: 1; }
+.tile.speaking .tile-speak-wave { opacity: 1; }
 .tile-speak-wave .wave-svg {
   position: absolute;
   left: 0; bottom: 0;
