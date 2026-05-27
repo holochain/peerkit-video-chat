@@ -176,7 +176,7 @@
         {@const hasCam = isSelf ? selfCam : ($remoteStreams.has(tile.agentId) && $remoteStreams.get(tile.agentId)!.getVideoTracks().length > 0)}
         <div
           class="tile {speaking ? 'speaking' : ''}"
-          data-indicator="glow"
+          data-indicator="wave"
         >
           <div class="tile-content {(isSelf && !selfCam) ? 'cam-off' : (!isSelf && !hasCam) ? 'cam-off' : ''}">
             {#if isSelf && selfCam}
