@@ -49,12 +49,18 @@ async function createWindow(): Promise<void> {
     height: 760,
     minWidth: 800,
     minHeight: 600,
+    show: false,
+    backgroundColor: "#0c0a18",
     title: "peerkit-video-chat (showcase)",
     webPreferences: {
       preload: resolve(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
   });
 
   if (process.env["ELECTRON_RENDERER_URL"] !== undefined) {
