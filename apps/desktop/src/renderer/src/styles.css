@@ -1533,6 +1533,53 @@ h1, h2, h3 {
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* ── Toasts ───────────────────────────────────────────────────── */
+
+.toast-stack {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  max-width: 380px;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--rad-2);
+  font-size: 13.5px;
+  line-height: 1.4;
+  pointer-events: all;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+  animation: toast-in 0.18s ease;
+}
+.toast-error {
+  background: var(--danger);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.toast-warn {
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border-2);
+}
+.toast-msg { flex: 1; }
+.toast-x {
+  appearance: none; border: 0; background: transparent;
+  color: inherit; opacity: 0.65; cursor: pointer;
+  font-size: 17px; line-height: 1; padding: 0; flex-shrink: 0;
+}
+.toast-x:hover { opacity: 1; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* scrollbar */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
