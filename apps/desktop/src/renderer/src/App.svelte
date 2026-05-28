@@ -245,10 +245,6 @@
     screen = 'prejoin';
   }
 
-  function onCreateRoom(roomName: string) {
-    onJoinRoom(roomName);
-  }
-
   function onRemoveSaved(name: string) {
     savedRooms = savedRooms.filter(r => r.name !== name);
     void window.app.store.set('savedRooms', savedRooms);
@@ -341,7 +337,6 @@
         {activeRooms}
         appVersion={__APP_VERSION__}
         onJoin={onJoinRoom}
-        onCreate={onCreateRoom}
         {onRemoveSaved}
       />
     {:else if screen === 'prejoin'}
