@@ -10,6 +10,10 @@ const peers = new Map<string, RTCPeerConnection>();
 const pendingCandidates = new Map<string, RTCIceCandidateInit[]>();
 // End-of-candidates received before the peer connection existed
 const pendingEoc = new Set<string>();
+// Peers for which we are the controlling agent (offerer) — only the offerer restarts ICE
+const offererPeers = new Set<string>();
+// ICE restart attempts since last successful connection, per peer (RFC 8445 §9)
+const iceRestartAttempts = new Map<string, number>();
 
 let localStream: MediaStream | null = null;
 let audioCtx: AudioContext | null = null;
@@ -180,13 +184,39 @@ function buildPeerConnection(agentId: string): RTCPeerConnection {
   };
 
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+    const state = pc.connectionState;
+    if (state === "connected" || state === "completed") {
+      iceRestartAttempts.delete(agentId);
+      return;
+    }
+    if (state === "failed") {
+      if (offererPeers.has(agentId)) {
+        const attempts = (iceRestartAttempts.get(agentId) ?? 0) + 1;
+        if (attempts <= 3) {
+          iceRestartAttempts.set(agentId, attempts);
+          void restartIce(agentId, pc);
+          return;
+        }
+      }
+      closePeer(agentId);
+    } else if (state === "closed") {
       closePeer(agentId);
     }
   };
 
   peers.set(agentId, pc);
   return pc;
+}
+
+async function restartIce(agentId: string, pc: RTCPeerConnection): Promise<void> {
+  try {
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    await window.app.sendSignal(agentId, { kind: "offer", sdp: offer.sdp ?? "" });
+  } catch (err) {
+    console.warn(`webrtc: ICE restart to ${agentId.slice(0, 12)} failed:`, err);
+    closePeer(agentId);
+  }
 }
 
 /** Apply buffered candidates (and end-of-candidates if received early). */
@@ -211,6 +241,7 @@ export async function initiateCall(toAgentId: string): Promise<void> {
   if (peers.has(toAgentId)) return;
   const stream = await acquireLocalStream();
   const pc = buildPeerConnection(toAgentId);
+  offererPeers.add(toAgentId);
   for (const track of stream.getTracks()) {
     pc.addTrack(track, stream);
   }
@@ -227,7 +258,21 @@ export async function handleSignal(
   signal: WebRtcSignal,
 ): Promise<void> {
   if (signal.kind === "offer") {
-    if (peers.has(fromAgentId)) return;
+    const existingPc = peers.get(fromAgentId);
+    if (existingPc !== undefined) {
+      // Accept renegotiation offers only during failure states (ICE restart from
+      // the remote offerer, RFC 8445 §9). Drop during healthy states to guard against glare.
+      const cs = existingPc.connectionState;
+      if (cs !== "failed" && cs !== "disconnected") return;
+      // Clear stale pre-restart candidates — fresh ones will follow.
+      pendingCandidates.delete(fromAgentId);
+      pendingEoc.delete(fromAgentId);
+      await existingPc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
+      const answer = await existingPc.createAnswer();
+      await existingPc.setLocalDescription(answer);
+      await window.app.sendSignal(fromAgentId, { kind: "answer", sdp: answer.sdp ?? "" });
+      return;
+    }
     const stream = await acquireLocalStream();
     const pc = buildPeerConnection(fromAgentId);
     for (const track of stream.getTracks()) {
@@ -288,6 +333,8 @@ export function closePeer(agentId: string): void {
   peers.delete(agentId);
   pendingCandidates.delete(agentId);
   pendingEoc.delete(agentId);
+  offererPeers.delete(agentId);
+  iceRestartAttempts.delete(agentId);
   stopSpeakingDetection(agentId);
   onRemoteStream?.(agentId, null);
 }
@@ -298,6 +345,8 @@ export function closeAll(): void {
   }
   pendingCandidates.clear();
   pendingEoc.clear();
+  offererPeers.clear();
+  iceRestartAttempts.clear();
   // Stop all remaining analyser nodes (includes local speaking detection).
   for (const agentId of [...analyserCleanup.keys()]) {
     stopSpeakingDetection(agentId);
