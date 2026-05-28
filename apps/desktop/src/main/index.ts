@@ -1,3 +1,5 @@
+import Store from "electron-store";
+
 import {
   startChatNode,
   type ChatNode,
@@ -19,6 +21,14 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+interface StoreSchema {
+  username: string;
+  savedRooms: Array<{ name: string; lastUsed: number }>;
+  theme: "system" | "light" | "dark";
+}
+
+const store = new Store<StoreSchema>();
 
 let chat: ChatNode | undefined;
 let mainWindow: BrowserWindow | undefined;
@@ -132,6 +142,12 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+ipcMain.handle("store:load", () => store.store);
+
+ipcMain.handle("store:set", (_event, key: string, value: unknown) => {
+  store.set(key as keyof StoreSchema, value as StoreSchema[keyof StoreSchema]);
 });
 
 ipcMain.handle("app:openExternal", async (_event, url: string) => {

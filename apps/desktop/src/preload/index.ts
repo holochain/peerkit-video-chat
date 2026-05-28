@@ -46,6 +46,12 @@ const api = {
     };
   },
 
+  store: {
+    load: (): Promise<Record<string, unknown>> => ipcRenderer.invoke("store:load"),
+    set: (key: string, value: unknown): Promise<void> =>
+      ipcRenderer.invoke("store:set", key, value),
+  },
+
   sendSignal: (toAgent: string, signal: WebRtcSignal): Promise<void> =>
     ipcRenderer.invoke("rtc:sendSignal", toAgent, signal),
 

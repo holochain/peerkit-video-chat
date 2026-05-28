@@ -43,8 +43,7 @@
 
   // ── State ───────────────────────────────────────────────────────
 
-  const _savedName = localStorage.getItem('pkvc:username') ?? '';
-  let screen = $state<Screen>(_savedName ? 'initializing' : 'identity');
+  let screen = $state<Screen>('initializing');
   let selfName = $state('');
   let selfAgentId = $state('');
   let relayAddr = $state('');
@@ -59,7 +58,7 @@
 
   let roomMembers = $state<RoomMember[]>([]);
   let chatMessages = $state<ChatMessage[]>([]);
-  let savedRooms = $state<SavedRoom[]>(loadSavedRooms());
+  let savedRooms = $state<SavedRoom[]>([]);
   let activeRooms = $state<ActiveRoom[]>([]);
 
   // Toasts
@@ -82,9 +81,7 @@
   }
 
   // Theme
-  let themePref = $state<ThemePref>(
-    (localStorage.getItem('pkvc:theme') as ThemePref) || 'system'
-  );
+  let themePref = $state<ThemePref>('system');
   let systemDark = $state(
     window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true
   );
@@ -92,26 +89,19 @@
     themePref === 'system' ? (systemDark ? 'dark' : 'light') : themePref
   );
 
-  // ── Persistence helpers ─────────────────────────────────────────
-
-  function loadSavedRooms(): SavedRoom[] {
-    try {
-      return JSON.parse(localStorage.getItem('pkvc:savedRooms') ?? '[]') as SavedRoom[];
-    } catch {
-      return [];
-    }
-  }
-
-  function persistSavedRooms(rooms: SavedRoom[]) {
-    localStorage.setItem('pkvc:savedRooms', JSON.stringify(rooms));
-  }
-
-  // ── Auto-init from saved username ──────────────────────────────
+  // ── Store load + auto-init ──────────────────────────────────────
 
   $effect(() => {
-    if (_savedName) {
-      onSetUsername(_savedName).catch(() => { screen = 'identity'; });
-    }
+    window.app.store.load().then((stored) => {
+      savedRooms = (stored['savedRooms'] as SavedRoom[] | undefined) ?? [];
+      themePref = (stored['theme'] as ThemePref | undefined) ?? 'system';
+      const username = stored['username'] as string | undefined;
+      if (username) {
+        onSetUsername(username).catch(() => { screen = 'identity'; });
+      } else {
+        screen = 'identity';
+      }
+    }).catch(() => { screen = 'identity'; });
   });
 
   // ── Theme setup ─────────────────────────────────────────────────
@@ -226,7 +216,7 @@
 
   async function onSetUsername(name: string) {
     selfName = name;
-    localStorage.setItem('pkvc:username', name);
+    void window.app.store.set('username', name);
     try {
       const result = await window.app.init(name);
       selfAgentId = result.agentId;
@@ -250,7 +240,7 @@
     } else {
       savedRooms = [{ name: normalized, lastUsed: Date.now() }, ...savedRooms];
     }
-    persistSavedRooms(savedRooms);
+    void window.app.store.set('savedRooms', savedRooms);
     currentRoom = normalized;
     screen = 'prejoin';
   }
@@ -261,7 +251,7 @@
 
   function onRemoveSaved(name: string) {
     savedRooms = savedRooms.filter(r => r.name !== name);
-    persistSavedRooms(savedRooms);
+    void window.app.store.set('savedRooms', savedRooms);
   }
 
   async function onConfirmJoin(audio: boolean, video: boolean) {
@@ -325,7 +315,7 @@
 
   function onSetTheme(pref: ThemePref) {
     themePref = pref;
-    localStorage.setItem('pkvc:theme', pref);
+    void window.app.store.set('theme', pref);
   }
 </script>
 
