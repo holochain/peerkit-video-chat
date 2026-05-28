@@ -382,6 +382,7 @@
         {roomMembers}
         {joinTime}
         {chatMessages}
+        speakerId={deviceIds.speaker}
         {onToggleMic}
         {onToggleCam}
         {onLeave}
