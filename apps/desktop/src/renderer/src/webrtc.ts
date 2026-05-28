@@ -16,6 +16,13 @@ const offererPeers = new Set<string>();
 const iceRestartAttempts = new Map<string, number>();
 
 let localStream: MediaStream | null = null;
+let preferredCameraId = '';
+let preferredMicId = '';
+
+export function setPreferredDevices(cameraId: string, micId: string): void {
+  preferredCameraId = cameraId;
+  preferredMicId = micId;
+}
 let audioCtx: AudioContext | null = null;
 
 // Cleanup functions for per-agent AnalyserNode loops (keyed by agentId, incl. "self")
@@ -56,8 +63,9 @@ async function acquireLocalStream(): Promise<MediaStream> {
       "Microphone access denied. Open System Settings → Privacy & Security → Microphone and allow access for this app.",
     );
   }
+  const audioConstraint = preferredMicId ? { deviceId: { ideal: preferredMicId } } : true;
   try {
-    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const s = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
     s.getAudioTracks().forEach((t) => stream.addTrack(t));
   } catch (err) {
     throw new Error(
@@ -69,8 +77,9 @@ async function acquireLocalStream(): Promise<MediaStream> {
 
   // Camera — optional. Skip silently if denied or unavailable.
   if (access.camera) {
+    const videoConstraint = preferredCameraId ? { deviceId: { ideal: preferredCameraId } } : true;
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: true });
+      const s = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
       s.getVideoTracks().forEach((t) => stream.addTrack(t));
     } catch {
       // Camera unavailable — continue audio-only.
@@ -375,7 +384,8 @@ export async function setCamMuted(muted: boolean): Promise<void> {
     } else if (!muted) {
       // If cam has been enabled but there are no video tracks (camera off),
       // get a new video track and add it to the stream.
-      const s = await navigator.mediaDevices.getUserMedia({ video: true });
+      const videoConstraint = preferredCameraId ? { deviceId: { ideal: preferredCameraId } } : true;
+      const s = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
       s.getVideoTracks().forEach((t) => localStream?.addTrack(t));
     }
   }

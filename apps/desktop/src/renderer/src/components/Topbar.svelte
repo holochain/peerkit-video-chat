@@ -4,18 +4,24 @@
   import SettingsPopover from './SettingsPopover.svelte';
   import { shortRelayAddr } from '../lib/helpers.js';
 
+  type DeviceKind = 'camera' | 'microphone' | 'speaker';
+
   let {
     selfName,
     selfAgentId,
     relayAddr,
     themePref,
     onSetTheme,
+    deviceIds,
+    onSetDevice,
   }: {
     selfName: string;
     selfAgentId: string;
     relayAddr: string;
     themePref: 'system' | 'light' | 'dark';
     onSetTheme: (pref: 'system' | 'light' | 'dark') => void;
+    deviceIds: Record<DeviceKind, string>;
+    onSetDevice: (kind: DeviceKind, id: string) => void;
   } = $props();
 
   const relayDisplay = $derived(relayAddr ? shortRelayAddr(relayAddr) : '…');
@@ -70,6 +76,8 @@
       <SettingsPopover
         {themePref}
         onSetTheme={onSetTheme}
+        {deviceIds}
+        {onSetDevice}
         onClose={() => { settingsOpen = false; }}
       />
     {/if}
