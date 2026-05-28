@@ -29,6 +29,7 @@
     roomMembers,
     joinTime,
     chatMessages,
+    speakerId = '',
     onToggleMic,
     onToggleCam,
     onLeave,
@@ -42,6 +43,7 @@
     roomMembers: RoomMember[];
     joinTime: number;
     chatMessages: ChatMessage[];
+    speakerId?: string;
     onToggleMic: () => void;
     onToggleCam: () => void;
     onLeave: () => void;
@@ -126,7 +128,17 @@
       // Reassigning the same stream resets the decoder and causes flicker.
       if (el.srcObject !== next) el.srcObject = next;
     }
+
+    function applySinkId() {
+      // Self tile is muted — speaker routing only applies to remote video.
+      if (agentId === selfAgentId) return;
+      (el as HTMLVideoElement & { setSinkId?(id: string): Promise<void> })
+        .setSinkId?.(speakerId)
+        ?.catch(() => {});
+    }
+
     setStream();
+    applySinkId();
 
     const unsub = remoteStreams.subscribe(() => {
       setStream();
@@ -136,6 +148,7 @@
       update(newAgentId: string) {
         agentId = newAgentId;
         setStream();
+        applySinkId();
       },
       destroy() {
         unsub();
@@ -143,6 +156,16 @@
       },
     };
   }
+
+  // Re-apply sink ID to all remote video elements when the speaker selection changes.
+  $effect(() => {
+    const id = speakerId;
+    document.querySelectorAll<HTMLVideoElement>('.tile video:not([muted])').forEach(el => {
+      (el as HTMLVideoElement & { setSinkId?(id: string): Promise<void> })
+        .setSinkId?.(id)
+        ?.catch(() => {});
+    });
+  });
 </script>
 
 <div class="call">
