@@ -160,7 +160,7 @@
   // Re-apply sink ID to all remote video elements when the speaker selection changes.
   $effect(() => {
     const id = speakerId;
-    document.querySelectorAll<HTMLVideoElement>('.tile video:not([muted])').forEach(el => {
+    document.querySelectorAll<HTMLVideoElement>('.tile video').forEach(el => {
       (el as HTMLVideoElement & { setSinkId?(id: string): Promise<void> })
         .setSinkId?.(id)
         ?.catch(() => {});
