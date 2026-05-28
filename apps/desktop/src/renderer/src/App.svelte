@@ -1,5 +1,7 @@
 <script lang="ts">
   import Topbar from './components/Topbar.svelte';
+  import ToastStack from './components/ToastStack.svelte';
+  import type { Toast } from './components/ToastStack.svelte';
   import IdentityScreen from './screens/IdentityScreen.svelte';
   import LobbyScreen from './screens/LobbyScreen.svelte';
   import PreJoinScreen from './screens/PreJoinScreen.svelte';
@@ -57,6 +59,25 @@
   let chatMessages = $state<ChatMessage[]>([]);
   let savedRooms = $state<SavedRoom[]>(loadSavedRooms());
   let activeRooms = $state<ActiveRoom[]>([]);
+
+  // Toasts
+  let toasts = $state<Toast[]>([]);
+
+  function pushToast(message: string, kind: Toast['kind'] = 'error') {
+    const id = String(Date.now() + Math.random());
+    toasts = [...toasts, { id, message, kind }];
+    setTimeout(() => { toasts = toasts.filter(t => t.id !== id); }, 5000);
+  }
+
+  function dismissToast(id: string) {
+    toasts = toasts.filter(t => t.id !== id);
+  }
+
+  function toastMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (typeof err === 'string') return err;
+    return 'An unexpected error occurred';
+  }
 
   // Theme
   let themePref = $state<ThemePref>(
@@ -175,12 +196,10 @@
       const result = await window.app.init(name);
       selfAgentId = result.agentId;
       relayAddr = result.relayAddr;
+      screen = 'lobby';
     } catch (err) {
-      console.error('Failed to init chat node:', err);
-      // Use a fallback placeholder agentId so UI still works
-      selfAgentId = 'pk1_' + Math.random().toString(36).slice(2, 12);
+      pushToast(toastMessage(err));
     }
-    screen = 'lobby';
   }
 
   function onJoinRoom(roomName: string) {
@@ -213,16 +232,20 @@
     selfCam = video;
     setMuted(!audio);
     setCamMuted(!video);
-    await window.app.joinRoom(currentRoom!);
-    joinTime = Date.now();
-    screen = 'call';
+    try {
+      await window.app.joinRoom(currentRoom!);
+      joinTime = Date.now();
+      screen = 'call';
+    } catch (err) {
+      pushToast(toastMessage(err));
+    }
   }
 
   async function onLeave() {
     try {
       await window.app.leaveRoom();
     } catch (err) {
-      console.warn('leaveRoom error:', err);
+      pushToast(toastMessage(err), 'warn');
     }
     closeAll();
     currentRoom = null;
@@ -255,7 +278,7 @@
         },
       ];
     } catch (err) {
-      console.warn('sendChat error:', err);
+      pushToast(toastMessage(err), 'warn');
     }
   }
 
@@ -318,4 +341,5 @@
       />
     {/if}
   </div>
+  <ToastStack {toasts} onDismiss={dismissToast} />
 </div>
