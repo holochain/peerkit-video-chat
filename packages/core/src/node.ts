@@ -142,6 +142,15 @@ export async function startChatNode(
     }
   };
 
+  const tryDialWithRetry = async (node: PeerkitNode, agentId: AgentId): Promise<void> => {
+    await tryDial(node, agentId);
+    for (const delay of [1000, 2000, 4000]) {
+      if (node.isConnected(agentId)) return;
+      await new Promise<void>((r) => setTimeout(r, delay));
+      await tryDial(node, agentId);
+    }
+  };
+
   let nodeRef: PeerkitNode | undefined;
 
   const builder = new PeerkitNodeBuilder({
@@ -163,7 +172,7 @@ export async function startChatNode(
     .withAgentsReceivedObserver((agentIds) => {
       const node = nodeRef;
       if (node === undefined) return;
-      for (const id of agentIds) void tryDial(node, id);
+      for (const id of agentIds) void tryDialWithRetry(node, id);
     })
     .withPeerConnectedObserver(() => {
       // New peer connection: re-announce so they learn we're in the room.
