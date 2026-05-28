@@ -228,18 +228,19 @@
   }
 
   function onJoinRoom(roomName: string) {
+    const normalized = roomName.trim().toLowerCase();
     // Bump or add saved room
-    const existing = savedRooms.find(r => r.name === roomName);
+    const existing = savedRooms.find(r => r.name === normalized);
     if (existing) {
       savedRooms = [
         { ...existing, lastUsed: Date.now() },
-        ...savedRooms.filter(r => r.name !== roomName),
+        ...savedRooms.filter(r => r.name !== normalized),
       ];
     } else {
-      savedRooms = [{ name: roomName, lastUsed: Date.now() }, ...savedRooms];
+      savedRooms = [{ name: normalized, lastUsed: Date.now() }, ...savedRooms];
     }
     persistSavedRooms(savedRooms);
-    currentRoom = roomName;
+    currentRoom = normalized;
     screen = 'prejoin';
   }
 
