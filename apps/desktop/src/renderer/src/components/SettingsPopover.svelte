@@ -44,10 +44,14 @@
           .filter((d) => d.kind === 'audiooutput')
           .map((d, i) => ({ id: d.deviceId, label: d.label || `Speaker ${i + 1}` })),
       };
-      // pick first as default if nothing stored yet
+      // Correct missing or stale selection. Skip until real device IDs are
+      // available — before permission, enumerateDevices returns empty IDs.
       for (const kind of ['camera', 'microphone', 'speaker'] as const) {
-        if (!selectedIds[kind] && availDevices[kind][0]) {
-          setDevice(kind, availDevices[kind][0].id);
+        const entries = availDevices[kind].filter(d => d.id);
+        if (entries.length === 0) continue;
+        const ids = entries.map(d => d.id);
+        if (!selectedIds[kind] || !ids.includes(selectedIds[kind])) {
+          setDevice(kind, entries[0].id);
         }
       }
     }).catch(() => {
