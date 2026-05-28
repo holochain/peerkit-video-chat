@@ -240,14 +240,14 @@
     } else {
       savedRooms = [{ name: normalized, lastUsed: Date.now() }, ...savedRooms];
     }
-    void window.app.store.set('savedRooms', savedRooms);
+    void window.app.store.set('savedRooms', $state.snapshot(savedRooms));
     currentRoom = normalized;
     screen = 'prejoin';
   }
 
   function onRemoveSaved(name: string) {
     savedRooms = savedRooms.filter(r => r.name !== name);
-    void window.app.store.set('savedRooms', savedRooms);
+    void window.app.store.set('savedRooms', $state.snapshot(savedRooms));
   }
 
   async function onConfirmJoin(audio: boolean, video: boolean) {
