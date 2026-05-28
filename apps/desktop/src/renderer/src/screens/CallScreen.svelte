@@ -120,12 +120,11 @@
   // Svelte action to bind video srcObject reactively
   function videoSrc(el: HTMLVideoElement, agentId: string) {
     function setStream() {
-      if (agentId === selfAgentId) {
-        el.srcObject = getLocalStream();
-      } else {
-        const streams = get(remoteStreams);
-        el.srcObject = streams.get(agentId) ?? null;
-      }
+      const next = agentId === selfAgentId
+        ? getLocalStream()
+        : (get(remoteStreams).get(agentId) ?? null);
+      // Reassigning the same stream resets the decoder and causes flicker.
+      if (el.srcObject !== next) el.srcObject = next;
     }
     setStream();
 
