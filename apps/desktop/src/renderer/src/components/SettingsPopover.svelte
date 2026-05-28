@@ -1,16 +1,20 @@
 <script lang="ts">
+  type DeviceKind = 'camera' | 'microphone' | 'speaker';
+  interface DeviceEntry { id: string; label: string; }
+
   let {
     themePref,
     onSetTheme,
+    deviceIds,
+    onSetDevice,
     onClose,
   }: {
     themePref: 'system' | 'light' | 'dark';
     onSetTheme: (pref: 'system' | 'light' | 'dark') => void;
+    deviceIds: Record<DeviceKind, string>;
+    onSetDevice: (kind: DeviceKind, id: string) => void;
     onClose: () => void;
   } = $props();
-
-  type DeviceKind = 'camera' | 'microphone' | 'speaker';
-  interface DeviceEntry { id: string; label: string; }
 
   let availDevices = $state<Record<DeviceKind, DeviceEntry[]>>({
     camera: [],
@@ -18,17 +22,13 @@
     speaker: [],
   });
 
-  let selectedIds = $state<Record<DeviceKind, string>>({
-    camera: localStorage.getItem('pkvc:dev:camera') ?? '',
-    microphone: localStorage.getItem('pkvc:dev:microphone') ?? '',
-    speaker: localStorage.getItem('pkvc:dev:speaker') ?? '',
-  });
+  let selectedIds = $state<Record<DeviceKind, string>>({ ...deviceIds });
 
   let popEl = $state<HTMLDivElement | null>(null);
 
   function setDevice(kind: DeviceKind, id: string) {
     selectedIds[kind] = id;
-    localStorage.setItem('pkvc:dev:' + kind, id);
+    onSetDevice(kind, id);
   }
 
   function refreshDevices() {

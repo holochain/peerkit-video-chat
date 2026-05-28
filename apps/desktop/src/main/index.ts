@@ -26,6 +26,7 @@ interface StoreSchema {
   username: string;
   savedRooms: Array<{ name: string; lastUsed: number }>;
   theme: "system" | "light" | "dark";
+  devices: { camera: string; microphone: string; speaker: string };
 }
 
 const store = new Store<StoreSchema>();

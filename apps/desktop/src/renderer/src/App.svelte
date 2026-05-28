@@ -11,6 +11,7 @@
     setSpeakingCallback,
     setMuted,
     setCamMuted,
+    setPreferredDevices,
     handleSignal,
     initiateCall,
     closeAll,
@@ -56,10 +57,13 @@
     members: Array<{ agentId: string; displayName: string }>;
   }
 
+  type DeviceKind = 'camera' | 'microphone' | 'speaker';
+
   let roomMembers = $state<RoomMember[]>([]);
   let chatMessages = $state<ChatMessage[]>([]);
   let savedRooms = $state<SavedRoom[]>([]);
   let activeRooms = $state<ActiveRoom[]>([]);
+  let deviceIds = $state<Record<DeviceKind, string>>({ camera: '', microphone: '', speaker: '' });
 
   // Toasts
   let toasts = $state<Toast[]>([]);
@@ -95,6 +99,11 @@
     window.app.store.load().then((stored) => {
       savedRooms = (stored['savedRooms'] as SavedRoom[] | undefined) ?? [];
       themePref = (stored['theme'] as ThemePref | undefined) ?? 'system';
+      const storedDevices = stored['devices'] as Record<DeviceKind, string> | undefined;
+      if (storedDevices) {
+        deviceIds = storedDevices;
+        setPreferredDevices(storedDevices.camera, storedDevices.microphone);
+      }
       const username = stored['username'] as string | undefined;
       if (username) {
         onSetUsername(username).catch(() => { screen = 'identity'; });
@@ -313,6 +322,14 @@
     themePref = pref;
     void window.app.store.set('theme', pref);
   }
+
+  function onSetDevice(kind: DeviceKind, id: string) {
+    deviceIds = { ...deviceIds, [kind]: id };
+    void window.app.store.set('devices', $state.snapshot(deviceIds));
+    if (kind === 'camera' || kind === 'microphone') {
+      setPreferredDevices(deviceIds.camera, deviceIds.microphone);
+    }
+  }
 </script>
 
 <div class="app" data-theme={themeResolved} data-density="spacious">
@@ -323,6 +340,8 @@
       {relayAddr}
       {themePref}
       {onSetTheme}
+      {deviceIds}
+      {onSetDevice}
     />
   {/if}
   <div class="page">
