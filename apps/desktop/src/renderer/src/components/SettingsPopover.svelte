@@ -22,12 +22,9 @@
     speaker: [],
   });
 
-  let selectedIds = $state<Record<DeviceKind, string>>({ ...deviceIds });
-
   let popEl = $state<HTMLDivElement | null>(null);
 
   function setDevice(kind: DeviceKind, id: string) {
-    selectedIds[kind] = id;
     onSetDevice(kind, id);
   }
 
@@ -50,7 +47,7 @@
         const entries = availDevices[kind].filter(d => d.id);
         if (entries.length === 0) continue;
         const ids = entries.map(d => d.id);
-        if (!selectedIds[kind] || !ids.includes(selectedIds[kind])) {
+        if (!deviceIds[kind] || !ids.includes(deviceIds[kind])) {
           setDevice(kind, entries[0].id);
         }
       }
@@ -107,7 +104,7 @@
       {:else}
         <select
           class="settings-row-select"
-          value={selectedIds[kind]}
+          value={deviceIds[kind]}
           onchange={(e) => setDevice(kind, (e.target as HTMLSelectElement).value)}
         >
           {#each entries as d (d.id)}
