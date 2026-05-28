@@ -12,6 +12,7 @@
     setMuted,
     setCamMuted,
     handleSignal,
+    initiateCall,
     closeAll,
   } from './webrtc.js';
   import { remoteStreams, speakingPeers } from './lib/stores.js';
@@ -139,6 +140,30 @@
         return n;
       });
     });
+  });
+
+  // ── WebRTC call initiation ──────────────────────────────────────
+  // Peers we have already initiated or accepted a call with this session.
+  // Plain Set (not $state) — used only for deduplication, not for rendering.
+  let knownPeers = new Set<string>();
+
+  $effect(() => {
+    if (screen !== 'call') {
+      knownPeers = new Set();
+      return;
+    }
+    for (const m of roomMembers) {
+      if (m.agentId === selfAgentId) continue;
+      if (!knownPeers.has(m.agentId)) {
+        knownPeers.add(m.agentId);
+        // Lower agent ID is the offerer — prevents both sides calling simultaneously.
+        if (selfAgentId < m.agentId) {
+          initiateCall(m.agentId).catch((err: unknown) => {
+            pushToast(toastMessage(err));
+          });
+        }
+      }
+    }
   });
 
   // ── IPC event handlers ──────────────────────────────────────────
