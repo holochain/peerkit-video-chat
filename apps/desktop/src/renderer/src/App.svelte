@@ -19,7 +19,7 @@
 
   declare const __APP_VERSION__: string;
 
-  type Screen = 'identity' | 'lobby' | 'prejoin' | 'call';
+  type Screen = 'identity' | 'initializing' | 'lobby' | 'prejoin' | 'call';
   type ThemePref = 'system' | 'light' | 'dark';
   type ThemeResolved = 'dark' | 'light';
 
@@ -43,7 +43,8 @@
 
   // ── State ───────────────────────────────────────────────────────
 
-  let screen = $state<Screen>('identity');
+  const _savedName = localStorage.getItem('pkvc:username') ?? '';
+  let screen = $state<Screen>(_savedName ? 'initializing' : 'identity');
   let selfName = $state('');
   let selfAgentId = $state('');
   let relayAddr = $state('');
@@ -104,6 +105,14 @@
   function persistSavedRooms(rooms: SavedRoom[]) {
     localStorage.setItem('pkvc:savedRooms', JSON.stringify(rooms));
   }
+
+  // ── Auto-init from saved username ──────────────────────────────
+
+  $effect(() => {
+    if (_savedName) {
+      onSetUsername(_savedName).catch(() => { screen = 'identity'; });
+    }
+  });
 
   // ── Theme setup ─────────────────────────────────────────────────
 
@@ -217,6 +226,7 @@
 
   async function onSetUsername(name: string) {
     selfName = name;
+    localStorage.setItem('pkvc:username', name);
     try {
       const result = await window.app.init(name);
       selfAgentId = result.agentId;
@@ -224,6 +234,7 @@
       screen = 'lobby';
     } catch (err) {
       pushToast(toastMessage(err));
+      screen = 'identity';
     }
   }
 
@@ -319,7 +330,7 @@
 </script>
 
 <div class="app" data-theme={themeResolved} data-density="spacious">
-  {#if screen !== 'identity'}
+  {#if screen !== 'identity' && screen !== 'initializing'}
     <Topbar
       {selfName}
       {selfAgentId}
@@ -331,6 +342,8 @@
   <div class="page">
     {#if screen === 'identity'}
       <IdentityScreen onContinue={onSetUsername} />
+    {:else if screen === 'initializing'}
+      <!-- blank while auto-connecting with saved username -->
     {:else if screen === 'lobby'}
       <LobbyScreen
         {selfName}
