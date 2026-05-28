@@ -114,6 +114,7 @@ h1, h2, h3 {
   background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
   background-size: 18px 18px;
   background-position: 0 0;
+  color: var(--fg);
   position: relative;
 }
 .app::before {
