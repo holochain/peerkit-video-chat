@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Electron desktop app for the peerkit-video-chat showcase",
-  "author": "Holochain",
+  "author": "Holochain Devs <dev-team@holochain.org>",
   "homepage": "https://github.com/holochain/peerkit-video-chat",
   "type": "module",
   "main": "./out/main/index.js",
