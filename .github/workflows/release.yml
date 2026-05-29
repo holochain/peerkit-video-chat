@@ -44,6 +44,19 @@ jobs:
       - name: Install
         run: npm install --no-audit --no-fund --prefer-offline
 
+      # Tag is the source of truth for the version. Write it into the desktop
+      # package.json before the build so it flows into the in-app version
+      # (__APP_VERSION__, baked by electron-vite), the installer metadata, and
+      # the artifact names. Not committed — only set for this build. Non-tag
+      # runs (branch/dispatch) keep the committed 0.0.0 dev version.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "release version: $ver"
+          npm pkg set version="$ver" -w @peerkit-video-chat/desktop
+
       - name: Build desktop bundle
         run: npm run build -w @peerkit-video-chat/desktop
 
