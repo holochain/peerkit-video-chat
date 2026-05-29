@@ -43,6 +43,7 @@ app.setName("peerkit-video-chat");
 const store = new Store<StoreSchema>();
 
 let chat: ChatNode | undefined;
+let chatInit: Promise<ChatNode> | undefined;
 let mainWindow: BrowserWindow | undefined;
 let relayAddr: string | undefined;
 
@@ -98,32 +99,36 @@ async function createWindow(): Promise<void> {
 }
 
 ipcMain.handle("chat:init", async (_event, displayName: string) => {
-  if (chat !== undefined) {
-    // Node already running — e.g. the renderer reloaded on laptop wake while
-    // the chat node kept its room membership. Report the live room state so the
-    // UI can route straight back into the active call instead of the lobby
-    // (where re-joining would fail with "already in a room").
-    return {
-      agentId: chat.agentId,
-      relayAddr: relayAddr ?? "",
-      room: chat.room.getStateView(),
-    };
+  if (chat === undefined) {
+    // Guard against concurrent init (e.g. a double-click on Continue, which
+    // stays enabled) starting two chat nodes: share a single in-flight startup
+    // promise so overlapping calls await the same node.
+    if (chatInit === undefined) {
+      relayAddr = getRelayAddress();
+      chatInit = startChatNode({
+        bootstrapRelays: [relayAddr],
+        displayName,
+        events: {
+          onState: (view: RoomStateView) => emit("chat:state", view),
+          onChat: (incoming: IncomingChat) => emit("chat:chat", incoming),
+          onSignal: (fromAgent: string, signal: WebRtcSignal) =>
+            emit("rtc:signal", { fromAgent, signal }),
+        },
+        onNetworkRooms: (rooms: NetworkRoomEntry[]) =>
+          emit("chat:networkRooms", rooms),
+        onPeerStats: (stats: PeerStats) => emit("chat:peerStats", stats),
+      });
+    }
+    chat = await chatInit;
   }
-  relayAddr = getRelayAddress();
-  chat = await startChatNode({
-    bootstrapRelays: [relayAddr],
-    displayName,
-    events: {
-      onState: (view: RoomStateView) => emit("chat:state", view),
-      onChat: (incoming: IncomingChat) => emit("chat:chat", incoming),
-      onSignal: (fromAgent: string, signal: WebRtcSignal) =>
-        emit("rtc:signal", { fromAgent, signal }),
-    },
-    onNetworkRooms: (rooms: NetworkRoomEntry[]) =>
-      emit("chat:networkRooms", rooms),
-    onPeerStats: (stats: PeerStats) => emit("chat:peerStats", stats),
-  });
-  return { agentId: chat.agentId, relayAddr, room: chat.room.getStateView() };
+  // Reports live room state too, so a renderer that reloaded mid-call (e.g. on
+  // laptop wake) routes straight back into the call instead of the lobby (where
+  // re-joining would fail with "already in a room").
+  return {
+    agentId: chat.agentId,
+    relayAddr: relayAddr ?? "",
+    room: chat.room.getStateView(),
+  };
 });
 
 ipcMain.handle("chat:peerStats", () => chat?.getPeerStats() ?? null);
