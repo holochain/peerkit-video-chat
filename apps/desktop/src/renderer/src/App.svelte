@@ -17,6 +17,7 @@
     closeAll,
   } from './webrtc.js';
   import { remoteStreams, speakingPeers } from './lib/stores.js';
+  import type { PeerStats } from '@peerkit-video-chat/core';
 
   declare const __APP_VERSION__: string;
 
@@ -48,6 +49,7 @@
   let selfName = $state('');
   let selfAgentId = $state('');
   let relayAddr = $state('');
+  let peerStats = $state<PeerStats | null>(null);
   let currentRoom = $state<string | null>(null);
   let joinTime = $state(0);
   let selfMic = $state(true);
@@ -192,6 +194,10 @@
       activeRooms = rooms;
     });
 
+    const unsubPeerStats = window.app.onPeerStats((stats) => {
+      peerStats = stats;
+    });
+
     const unsubChat = window.app.onChat((incoming) => {
       // skip echo of own messages — we add them optimistically in onSendChat
       if (incoming.from === selfAgentId) return;
@@ -216,6 +222,7 @@
     return () => {
       unsubState();
       unsubNetworkRooms();
+      unsubPeerStats();
       unsubChat();
       unsubSignal();
     };
@@ -230,6 +237,7 @@
       const result = await window.app.init(name);
       selfAgentId = result.agentId;
       relayAddr = result.relayAddr;
+      void window.app.getPeerStats().then((s) => { if (s) peerStats = s; });
       if (result.room.kind === 'inRoom') {
         // The chat node was already in a room — the renderer reloaded while a
         // call was live (e.g. closing/opening the laptop lid). Drop straight
@@ -352,6 +360,7 @@
       {selfName}
       {selfAgentId}
       {relayAddr}
+      {peerStats}
       {themePref}
       {onSetTheme}
       {deviceIds}

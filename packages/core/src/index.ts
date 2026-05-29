@@ -18,4 +18,9 @@ export type {
 } from "./room.js";
 
 export { startChatNode } from "./node.js";
-export type { ChatNode, ChatNodeOptions, NetworkRoomEntry } from "./node.js";
+export type {
+  ChatNode,
+  ChatNodeOptions,
+  NetworkRoomEntry,
+  PeerStats,
+} from "./node.js";

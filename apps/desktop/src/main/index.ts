@@ -5,6 +5,7 @@ import {
   type ChatNode,
   type IncomingChat,
   type NetworkRoomEntry,
+  type PeerStats,
   type RoomStateView,
   type WebRtcSignal,
 } from "@peerkit-video-chat/core";
@@ -111,9 +112,12 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
     },
     onNetworkRooms: (rooms: NetworkRoomEntry[]) =>
       emit("chat:networkRooms", rooms),
+    onPeerStats: (stats: PeerStats) => emit("chat:peerStats", stats),
   });
   return { agentId: chat.agentId, relayAddr, room: chat.room.getStateView() };
 });
+
+ipcMain.handle("chat:peerStats", () => chat?.getPeerStats() ?? null);
 
 ipcMain.handle("chat:setDisplayName", (_event, name: string) => {
   if (chat === undefined) throw new Error("chat node not initialized");
