@@ -1,8 +1,3 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { app, BrowserWindow, ipcMain, session, shell } from "electron";
-
 import {
   startChatNode,
   type ChatNode,
@@ -11,6 +6,16 @@ import {
   type RoomStateView,
   type WebRtcSignal,
 } from "@peerkit-video-chat/core";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  session,
+  shell,
+  systemPreferences,
+} from "electron";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -84,7 +89,8 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
       onSignal: (fromAgent: string, signal: WebRtcSignal) =>
         emit("rtc:signal", { fromAgent, signal }),
     },
-    onNetworkRooms: (rooms: NetworkRoomEntry[]) => emit("chat:networkRooms", rooms),
+    onNetworkRooms: (rooms: NetworkRoomEntry[]) =>
+      emit("chat:networkRooms", rooms),
   });
   return { agentId: chat.agentId, relayAddr: relayAddress };
 });
@@ -138,4 +144,13 @@ ipcMain.handle("app:openExternal", async (_event, url: string) => {
 
 app.on("before-quit", async () => {
   await chat?.shutDown();
+});
+
+ipcMain.handle("app:requestMediaAccess", async () => {
+  if (process.platform !== "darwin") {
+    return { camera: true, microphone: true };
+  }
+  const camera = await systemPreferences.askForMediaAccess("camera");
+  const microphone = await systemPreferences.askForMediaAccess("microphone");
+  return { camera, microphone };
 });

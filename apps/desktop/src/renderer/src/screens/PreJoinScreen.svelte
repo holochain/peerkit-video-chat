@@ -18,6 +18,7 @@
     onToggleVideo,
     onJoin,
     onBack,
+    onError,
   }: {
     selfAgentId: string;
     selfName: string;
@@ -29,6 +30,7 @@
     onToggleVideo: () => void;
     onJoin: (audio: boolean, video: boolean) => void;
     onBack: () => void;
+    onError: (err: unknown) => void;
   } = $props();
 
   let videoEl = $state<HTMLVideoElement | null>(null);
@@ -37,14 +39,14 @@
   let analyserRef: AnalyserNode | null = null;
   let sourceRef: MediaStreamAudioSourceNode | null = null;
   let rafRef = 0;
-  let localStream: MediaStream | null = null;
+  let localStream = $state<MediaStream | null>(null);
 
   $effect(() => {
     initLocalMedia(selfAgentId).then((stream) => {
       localStream = stream;
       startMicLevel(stream);
-    }).catch(() => {
-      // fallback: stream not available
+    }).catch((err: unknown) => {
+      onError(err);
     });
 
     return () => { stopMicLevel(); };

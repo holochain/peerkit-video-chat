@@ -12,6 +12,8 @@ const api = {
     ipcRenderer.invoke("chat:init", displayName),
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke("app:openExternal", url),
+  requestMediaAccess: (): Promise<{ camera: boolean; microphone: boolean }> =>
+    ipcRenderer.invoke("app:requestMediaAccess"),
   setDisplayName: (name: string): Promise<void> =>
     ipcRenderer.invoke("chat:setDisplayName", name),
   joinRoom: (name: string): Promise<void> =>
