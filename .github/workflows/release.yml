@@ -7,11 +7,6 @@ on:
   push:
     tags:
       - "v*"
-    # TEMP: build releases on every push to this branch so we can test the
-    # packaging pipeline before it lands on main (where workflow_dispatch and
-    # tag triggers take over). Remove this branch entry before merging.
-    branches:
-      - "feat/packaging-and-connection-ux"
   workflow_dispatch:
 
 jobs:
