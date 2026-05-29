@@ -119,6 +119,60 @@ jobs:
           export APPIMAGE_EXTRACT_AND_RUN=1
           smoke "AppImage" xvfb-run -a "$appimage"
 
+      # Install the pkg and launch the bundled binary; assert it stays up.
+      # The runner has a window server, and a locally-built app carries no
+      # com.apple.quarantine attribute, so Gatekeeper doesn't block it.
+      - name: Smoke-test macOS package
+        if: matrix.os == 'macos-latest'
+        run: |
+          set -euo pipefail
+          pkg="$(ls apps/desktop/release/*.pkg)"
+          sudo installer -pkg "$pkg" -target /
+          app_dir="$(ls -d /Applications/*.app | grep -i peerkit | head -1)"
+          bin="$app_dir/Contents/MacOS/$(ls "$app_dir/Contents/MacOS" | head -1)"
+          echo "binary: $bin"
+          test -x "$bin" || { echo "::error::installed binary missing"; exit 1; }
+          "$bin" >/tmp/smoke.log 2>&1 &
+          pid=$!
+          sleep 12
+          alive=0
+          kill -0 "$pid" 2>/dev/null && alive=1
+          kill -9 "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          cat /tmp/smoke.log || true
+          if [ "$alive" -ne 1 ]; then
+            echo "::error::macOS app exited before finishing startup"; exit 1
+          fi
+          if grep -qiE "dyld|Library not loaded|Symbol not found|Abort trap" /tmp/smoke.log; then
+            echo "::error::macOS crash signature on launch"; exit 1
+          fi
+          echo "OK: pkg survived launch"
+
+      # Install the msi silently and launch the installed exe; assert it stays up.
+      - name: Smoke-test Windows package
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Get-ChildItem apps/desktop/release/*.msi | Select-Object -First 1
+          Write-Output "installing $($msi.Name)"
+          Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait
+          $roots = @(
+            "$env:ProgramFiles\PeerKit-Video-Chat",
+            "${env:ProgramFiles(x86)}\PeerKit-Video-Chat",
+            "$env:LOCALAPPDATA\Programs\PeerKit-Video-Chat"
+          )
+          $exe = $roots | Where-Object { Test-Path $_ } |
+            ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue } |
+            Where-Object { $_.Name -like '*peerkit*' } | Select-Object -First 1
+          if (-not $exe) { Write-Error "installed exe not found under: $($roots -join ', ')"; exit 1 }
+          Write-Output "launching $($exe.FullName)"
+          $p = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { Write-Error "Windows app exited before startup (code $($p.ExitCode))"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+          Write-Output "OK: msi survived launch"
+
   # Publish once, after every platform has packaged, so the release is created
   # a single time with the full set of installers (no concurrent-create race).
   release:
