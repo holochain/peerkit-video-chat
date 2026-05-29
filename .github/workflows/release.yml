@@ -155,17 +155,22 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $msi = Get-ChildItem apps/desktop/release/*.msi | Select-Object -First 1
+          $log = Join-Path $env:RUNNER_TEMP 'msi-install.log'
           Write-Output "installing $($msi.Name)"
-          Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait
-          $roots = @(
-            "$env:ProgramFiles\PeerKit-Video-Chat",
-            "${env:ProgramFiles(x86)}\PeerKit-Video-Chat",
-            "$env:LOCALAPPDATA\Programs\PeerKit-Video-Chat"
-          )
-          $exe = $roots | Where-Object { Test-Path $_ } |
-            ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue } |
-            Where-Object { $_.Name -like '*peerkit*' } | Select-Object -First 1
-          if (-not $exe) { Write-Error "installed exe not found under: $($roots -join ', ')"; exit 1 }
+          $proc = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
+          Write-Output "msiexec exit code: $($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0) {
+            Write-Output "---- msi log tail ----"; Get-Content $log -Tail 40
+            Write-Error "msi install failed ($($proc.ExitCode))"; exit 1
+          }
+          # Locate the installed exe by name (don't assume the install folder).
+          $exe = Get-ChildItem "$env:ProgramFiles","${env:ProgramFiles(x86)}","$env:LOCALAPPDATA" `
+            -Recurse -Filter 'peerkit-video-chat.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) {
+            Write-Output "---- $env:ProgramFiles ----"; Get-ChildItem $env:ProgramFiles -Name
+            Write-Output "---- $env:LOCALAPPDATA ----"; Get-ChildItem $env:LOCALAPPDATA -Name
+            Write-Error "installed exe not found"; exit 1
+          }
           Write-Output "launching $($exe.FullName)"
           $p = Start-Process -FilePath $exe.FullName -PassThru
           Start-Sleep -Seconds 12
