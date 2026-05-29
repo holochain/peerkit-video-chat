@@ -33,6 +33,7 @@ const store = new Store<StoreSchema>();
 
 let chat: ChatNode | undefined;
 let mainWindow: BrowserWindow | undefined;
+let relayAddr: string | undefined;
 
 function emit(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
@@ -88,11 +89,19 @@ async function createWindow(): Promise<void> {
 
 ipcMain.handle("chat:init", async (_event, displayName: string) => {
   if (chat !== undefined) {
-    return { agentId: chat.agentId };
+    // Node already running — e.g. the renderer reloaded on laptop wake while
+    // the chat node kept its room membership. Report the live room state so the
+    // UI can route straight back into the active call instead of the lobby
+    // (where re-joining would fail with "already in a room").
+    return {
+      agentId: chat.agentId,
+      relayAddr: relayAddr ?? "",
+      room: chat.room.getStateView(),
+    };
   }
-  const relayAddress = getRelayAddress();
+  relayAddr = getRelayAddress();
   chat = await startChatNode({
-    bootstrapRelays: [relayAddress],
+    bootstrapRelays: [relayAddr],
     displayName,
     events: {
       onState: (view: RoomStateView) => emit("chat:state", view),
@@ -103,7 +112,7 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
     onNetworkRooms: (rooms: NetworkRoomEntry[]) =>
       emit("chat:networkRooms", rooms),
   });
-  return { agentId: chat.agentId, relayAddr: relayAddress };
+  return { agentId: chat.agentId, relayAddr, room: chat.room.getStateView() };
 });
 
 ipcMain.handle("chat:setDisplayName", (_event, name: string) => {
