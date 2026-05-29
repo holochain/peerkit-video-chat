@@ -183,6 +183,20 @@ export class Room {
     void this.broadcastJoin(this.state.room);
   }
 
+  /**
+   * Current room membership as a snapshot. Lets a freshly (re)loaded UI learn
+   * it is already in a room — e.g. after the renderer reloads on laptop wake
+   * while the node kept running — without waiting for the next state event.
+   */
+  getStateView(): RoomStateView {
+    if (this.state.kind === "idle") return { kind: "idle" };
+    return {
+      kind: "inRoom",
+      room: this.state.room,
+      members: this.rosterEntries(),
+    };
+  }
+
   onPeerDisconnected(agentId: AgentId): void {
     if (this.state.kind !== "inRoom") return;
     if (this.state.members.delete(agentId)) {

@@ -230,7 +230,21 @@
       const result = await window.app.init(name);
       selfAgentId = result.agentId;
       relayAddr = result.relayAddr;
-      screen = 'lobby';
+      if (result.room.kind === 'inRoom') {
+        // The chat node was already in a room — the renderer reloaded while a
+        // call was live (e.g. closing/opening the laptop lid). Drop straight
+        // back into the call instead of stranding us in the lobby, where
+        // re-joining would fail with "already in a room".
+        currentRoom = result.room.room;
+        roomMembers = result.room.members.map(m => ({
+          agentId: m.agentId,
+          displayName: m.displayName,
+        }));
+        joinTime = Date.now();
+        screen = 'call';
+      } else {
+        screen = 'lobby';
+      }
     } catch (err) {
       pushToast(toastMessage(err));
       screen = 'identity';

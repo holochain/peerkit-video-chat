@@ -8,7 +8,9 @@ import type {
 } from "@peerkit-video-chat/core";
 
 const api = {
-  init: (displayName: string): Promise<{ agentId: string; relayAddr: string }> =>
+  init: (
+    displayName: string,
+  ): Promise<{ agentId: string; relayAddr: string; room: RoomStateView }> =>
     ipcRenderer.invoke("chat:init", displayName),
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke("app:openExternal", url),
