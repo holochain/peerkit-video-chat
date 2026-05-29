@@ -440,6 +440,13 @@ export async function setCamMuted(muted: boolean): Promise<void> {
   const s = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
   const track = s.getVideoTracks()[0];
   if (track === undefined) return;
+  // getUserMedia is async: a mute toggle (or call teardown) may have raced ahead
+  // while it was pending. If the camera is no longer wanted, or the call is gone,
+  // discard the freshly acquired track instead of streaming it to peers.
+  if (!camEnabled || localStream === null) {
+    track.stop();
+    return;
+  }
   localStream.addTrack(track);
   await Promise.all(
     [...videoSenders.values()].map((sender) => sender.replaceTrack(track)),
