@@ -29,6 +29,11 @@ linux:
     - deb
   category: Network
   maintainer: Holochain
+deb:
+  # Override the default postinst, which disables the SUID sandbox on hosts
+  # where unprivileged user namespaces look usable at install time. Ubuntu
+  # 24.04+ then blocks userns at runtime and Electron aborts. See the script.
+  afterInstall: build/deb-after-install.sh
 mac:
   target:
     - pkg
