@@ -1,0 +1,74 @@
+name: Release
+
+# Packaging the desktop app on three OSes is slow, so it only runs for version
+# tags (e.g. v0.1.0) or a manual dispatch — not on every push. The fast
+# typecheck/test/bundle still runs per-PR in build.yml.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            script: package:linux
+          - os: macos-latest
+            script: package:mac
+          - os: windows-latest
+            script: package:win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      # See build.yml: npm 11 omits cross-platform optional binaries from the
+      # lock file, so `npm ci` would refuse to proceed. `npm install` resolves
+      # the same versions and is permissive about the missing entries.
+      - name: Install
+        run: npm install --no-audit --no-fund --prefer-offline
+
+      - name: Build desktop bundle
+        run: npm run build -w @peerkit-video-chat/desktop
+
+      - name: Package installers
+        run: npm run ${{ matrix.script }} -w @peerkit-video-chat/desktop -- --publish never
+        env:
+          # Unsigned builds for now — don't let electron-builder hunt for a
+          # signing identity on macOS.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.pkg
+            apps/desktop/release/*.msi
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.pkg
+            apps/desktop/release/*.msi
