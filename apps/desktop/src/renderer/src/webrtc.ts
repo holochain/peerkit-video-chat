@@ -22,6 +22,9 @@ const videoSenders = new Map<string, RTCRtpSender>();
 let localStream: MediaStream | null = null;
 let preferredCameraId = '';
 let preferredMicId = '';
+// Whether the camera should be live. When false we never open the camera nor
+// hold a video track — toggling it on acquires one on demand (see setCamMuted).
+let camEnabled = true;
 
 export function setPreferredDevices(cameraId: string, micId: string): void {
   preferredCameraId = cameraId;
@@ -79,8 +82,8 @@ async function acquireLocalStream(): Promise<MediaStream> {
     );
   }
 
-  // Camera — optional. Skip silently if denied or unavailable.
-  if (access.camera) {
+  // Camera — optional. Skip when turned off, denied, or unavailable.
+  if (access.camera && camEnabled) {
     const videoConstraint = preferredCameraId ? { deviceId: { ideal: preferredCameraId } } : true;
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
@@ -408,6 +411,9 @@ export function setMuted(muted: boolean): void {
 }
 
 export async function setCamMuted(muted: boolean): Promise<void> {
+  // Record intent first so a later acquireLocalStream() honours it even when no
+  // stream exists yet (e.g. toggled off on the pre-join screen before joining).
+  camEnabled = !muted;
   if (localStream === null) return;
 
   if (muted) {
