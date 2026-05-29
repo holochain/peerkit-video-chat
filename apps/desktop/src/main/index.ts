@@ -37,6 +37,12 @@ interface StoreSchema {
 // can't associate the window with its icon. Set before Store reads userData.
 app.setName("peerkit-video-chat");
 
+// On Wayland the window has no WM_CLASS; GNOME maps it to its .desktop (and so
+// its icon) by xdg app_id, which Electron derives from Chromium's --class
+// switch — app.setName does not set it. Match the peerkit-video-chat.desktop
+// basename so the icon resolves on Wayland (harmless under X11/XWayland).
+app.commandLine.appendSwitch("class", "peerkit-video-chat");
+
 const store = new Store<StoreSchema>();
 
 let chat: ChatNode | undefined;
