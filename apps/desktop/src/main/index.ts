@@ -30,6 +30,13 @@ interface StoreSchema {
   devices: { camera: string; microphone: string; speaker: string };
 }
 
+// Pin a clean app name. Electron derives the Linux window identity from it
+// (WM_CLASS on X11, app_id on Wayland); without this it falls back to the
+// scoped package name "@peerkit-video-chat/desktop", which matches neither the
+// installed peerkit-video-chat.desktop nor its StartupWMClass, so the desktop
+// can't associate the window with its icon. Set before Store reads userData.
+app.setName("peerkit-video-chat");
+
 const store = new Store<StoreSchema>();
 
 let chat: ChatNode | undefined;
