@@ -78,32 +78,46 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb ./apps/desktop/release/*.deb
 
+          # Postinst must leave the SUID sandbox owned by root, mode 4755
+          # (Ubuntu 24.04+ blocks the userns sandbox at runtime).
+          perms="$(stat -c '%a %U' '/opt/PeerKit-Video-Chat/chrome-sandbox')"
+          echo "chrome-sandbox: $perms"
+          if [ "$perms" != "4755 root" ]; then
+            echo "::error::chrome-sandbox is '$perms', expected '4755 root'"; exit 1
+          fi
+
+          # Launch headless and confirm it stays up. Run with --no-sandbox so
+          # the result doesn't depend on the runner's userns policy; the sandbox
+          # mode itself is asserted above. Hard-kill after the window so we don't
+          # trip on Electron's noisy headless *shutdown* path.
           smoke() {
             local name="$1"; shift
             echo "::group::smoke $name"
-            set +e
-            timeout 15 xvfb-run -a "$@" --no-sandbox >/tmp/smoke.log 2>&1
-            local code=$?
-            set -e
+            "$@" --no-sandbox >/tmp/smoke.log 2>&1 &
+            local pid=$!
+            sleep 12
+            local alive=0
+            kill -0 "$pid" 2>/dev/null && alive=1
+            kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
             cat /tmp/smoke.log
             echo "::endgroup::"
-            if grep -qiE "FATAL|execvp|core dumped|cannot open shared object|symbol lookup error" /tmp/smoke.log; then
-              echo "::error::$name crashed on launch"; return 1
+            if [ "$alive" -ne 1 ]; then
+              echo "::error::$name exited before finishing startup"; return 1
             fi
-            # 124 = killed by timeout (stayed alive = good); 0 = clean exit.
-            if [ "$code" -ne 124 ] && [ "$code" -ne 0 ]; then
-              echo "::error::$name exited $code on launch"; return 1
+            if grep -qiE "failed to execvp|cannot open shared object|symbol lookup error|SUID sandbox helper" /tmp/smoke.log; then
+              echo "::error::$name crash signature on launch"; return 1
             fi
             echo "OK: $name survived launch"
           }
 
           # Installed deb binary (on PATH via /usr/bin symlink).
-          smoke "deb" peerkit-video-chat
+          smoke "deb" xvfb-run -a peerkit-video-chat
           # AppImage, extracted (CI runners have no FUSE).
           appimage="$(ls apps/desktop/release/*.AppImage)"
           chmod +x "$appimage"
           export APPIMAGE_EXTRACT_AND_RUN=1
-          smoke "AppImage" "$appimage"
+          smoke "AppImage" xvfb-run -a "$appimage"
 
   # Publish once, after every platform has packaged, so the release is created
   # a single time with the full set of installers (no concurrent-create race).
