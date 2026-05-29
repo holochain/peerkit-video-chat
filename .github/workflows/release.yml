@@ -1,13 +1,12 @@
 name: Release
 
-# Packaging the desktop app on three OSes is slow, so it only runs for version
-# tags (e.g. v0.1.0) or a manual dispatch — not on every push. The fast
-# typecheck/test/bundle still runs per-PR in build.yml.
+# Packaging the desktop app on three OSes is slow and produces a published
+# release, so it runs only for version tags (e.g. v0.1.0) — not on every push.
+# The fast typecheck/test/bundle still runs per-PR in build.yml.
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 # Least privilege by default; the release job widens to contents: write.
 permissions:
