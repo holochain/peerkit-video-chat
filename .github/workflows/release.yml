@@ -163,20 +163,27 @@ jobs:
             Write-Output "---- msi log tail ----"; Get-Content $log -Tail 40
             Write-Error "msi install failed ($($proc.ExitCode))"; exit 1
           }
-          # Read the install dir from the registry uninstall entry (fast and
-          # reliable — no filesystem walk, no assumption about the folder).
-          $uninstall = @(
-            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          # The registry uninstall entry has no InstallLocation for this MSI, so
+          # derive the install dir from the verbose install log (ground truth),
+          # with the usual install roots as a fallback.
+          $candidates = @()
+          $candidates += Select-String -Path $log -Pattern '([A-Za-z]:\\[^\r\n";]*PeerKit-Video-Chat)' -AllMatches |
+            ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value }
+          $candidates += @(
+            "$env:ProgramFiles\PeerKit-Video-Chat",
+            "${env:ProgramFiles(x86)}\PeerKit-Video-Chat",
+            "$env:LOCALAPPDATA\Programs\PeerKit-Video-Chat",
+            "$env:LOCALAPPDATA\PeerKit-Video-Chat"
           )
-          $entry = Get-ItemProperty $uninstall -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -like '*PeerKit*' } | Select-Object -First 1
-          $dir = $entry.InstallLocation
+          $dir = $candidates | Sort-Object -Unique | Where-Object { Test-Path $_ } | Select-Object -First 1
           Write-Output "install dir: $dir"
-          $exe = if ($dir) { Get-ChildItem $dir -Recurse -Filter 'peerkit-video-chat.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          $exe = if ($dir) {
+            Get-ChildItem $dir -Recurse -Filter '*.exe' -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match 'peerkit' } | Select-Object -First 1
+          }
           if (-not $exe) {
-            Write-Output "---- uninstall entry ----"; $entry | Format-List DisplayName,InstallLocation,DisplayVersion
+            Write-Output "---- PeerKit paths seen in msi log ----"
+            Select-String -Path $log -Pattern 'PeerKit-Video-Chat' | Select-Object -First 15 | ForEach-Object { $_.Line }
             Write-Error "installed exe not found"; exit 1
           }
           Write-Output "launching $($exe.FullName)"
