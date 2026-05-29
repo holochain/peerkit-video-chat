@@ -1,5 +1,8 @@
 appId: org.holochain.peerkit-video-chat
-productName: PeerKit Video Chat
+# No spaces: a space in productName becomes a space in the Linux install path
+# (/opt/<productName>), which breaks Electron's zygote self-exec on Linux
+# (FATAL "failed to execvp: /opt/PeerKit").
+productName: PeerKit-Video-Chat
 # electron is hoisted to the workspace root, so electron-builder can't infer the
 # version from apps/desktop/node_modules. Pin it (keep in sync with the electron
 # devDependency in package.json).

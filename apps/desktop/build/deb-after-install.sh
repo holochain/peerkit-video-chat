@@ -7,10 +7,11 @@
 # the SUID sandbox and aborts ("chrome-sandbox ... must be owned by root and
 # have mode 4755"). Always enabling the setuid sandbox works on every kernel.
 #
-# Paths are hardcoded to match electron-builder.yml: productName "PeerKit Video
-# Chat" installs under /opt/PeerKit Video Chat; executableName peerkit-video-chat.
+# Paths are hardcoded to match electron-builder.yml: productName
+# "PeerKit-Video-Chat" installs under /opt/PeerKit-Video-Chat; executableName
+# peerkit-video-chat.
 
-INSTALL_DIR='/opt/PeerKit Video Chat'
+INSTALL_DIR='/opt/PeerKit-Video-Chat'
 EXE='peerkit-video-chat'
 
 if type update-alternatives 2>/dev/null >&1; then
