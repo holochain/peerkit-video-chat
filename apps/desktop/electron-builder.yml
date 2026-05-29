@@ -34,11 +34,6 @@ files:
 # stay outside the asar to be loadable.
 asarUnpack:
   - "**/*.node"
-# Ship the icon inside the app so the main process can set it as the runtime
-# window/taskbar icon (the installed hicolor icons only cover the launcher).
-extraResources:
-  - from: build/icon.png
-    to: icon.png
 # CI installs the correct per-platform binaries already; don't rebuild.
 npmRebuild: false
 linux:
