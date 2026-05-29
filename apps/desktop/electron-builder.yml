@@ -1,0 +1,39 @@
+appId: org.holochain.peerkit-video-chat
+productName: PeerKit Video Chat
+# electron is hoisted to the workspace root, so electron-builder can't infer the
+# version from apps/desktop/node_modules. Pin it (keep in sync with the electron
+# devDependency in package.json).
+electronVersion: 42.2.0
+# No code signing for now — see CSC_IDENTITY_AUTO_DISCOVERY=false in CI.
+directories:
+  output: release
+  buildResources: build
+# Avoid the scoped npm name (@peerkit-video-chat/desktop) leaking into artifact
+# paths/filenames.
+artifactName: peerkit-video-chat-${version}-${arch}.${ext}
+executableName: peerkit-video-chat
+# electron-vite emits the runnable app to out/; everything else is bundled in.
+files:
+  - out/**/*
+  - package.json
+  - "!**/*.{map,ts,tsbuildinfo}"
+# cbor-extract (via PeerKit's serializer) ships a native .node addon that must
+# stay outside the asar to be loadable.
+asarUnpack:
+  - "**/*.node"
+# CI installs the correct per-platform binaries already; don't rebuild.
+npmRebuild: false
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Network
+  maintainer: Holochain
+mac:
+  target:
+    - pkg
+  category: public.app-category.social-networking
+  identity: null
+win:
+  target:
+    - msi

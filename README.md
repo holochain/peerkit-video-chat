@@ -61,6 +61,24 @@ relay other than the local dev one.
 
 In each desktop window: set a display name, type the same room name in both, and start chatting. Roster updates as peers join and leave.
 
+## Packaging
+
+`electron-builder` produces installers for all three desktop platforms:
+
+```sh
+npm run build -w @peerkit-video-chat/desktop
+npm run package:linux -w @peerkit-video-chat/desktop   # AppImage + deb
+npm run package:mac   -w @peerkit-video-chat/desktop   # pkg
+npm run package:win   -w @peerkit-video-chat/desktop   # msi
+```
+
+Each builds for the host OS; output lands in `apps/desktop/release/`. Builds are
+unsigned for now. CI (`.github/workflows/release.yml`) runs the three-OS matrix
+on version tags (`v*`) and attaches the installers to the GitHub Release.
+
+Packaged builds ship with a default bootstrap relay so they work out of the box;
+set `PEERKIT_RELAY_ADDR` to override it (e.g. to point at a local dev relay).
+
 ## Deploying the relay
 
 For shared testing, deploy the relay to a server with a public IP and direct TCP access (a VPS — not a PaaS HTTP proxy).

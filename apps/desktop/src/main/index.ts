@@ -40,14 +40,13 @@ function emit(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
 }
 
+// Baked-in relay so packaged builds work out of the box. Override at runtime
+// with PEERKIT_RELAY_ADDR (e.g. to point at a local dev relay).
+const DEFAULT_RELAY_ADDR = "/ip4/178.62.198.220/tcp/9000/ws";
+
 function getRelayAddress(): string {
   const addr = process.env["PEERKIT_RELAY_ADDR"]?.trim();
-  if (addr === undefined || addr === "") {
-    throw new Error(
-      "No relay address. Set PEERKIT_RELAY_ADDR to a bootstrap relay multiaddr " +
-        "(the dev relay prints one to copy: `npm run dev:relay`).",
-    );
-  }
+  if (addr === undefined || addr === "") return DEFAULT_RELAY_ADDR;
   return addr;
 }
 
