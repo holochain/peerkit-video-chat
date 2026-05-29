@@ -40,6 +40,11 @@ linux:
   # Directory of <size>x<size>.png icons so the desktop has every size it needs
   # for the taskbar/dash (a lone 1024px icon isn't picked up).
   icon: build/icons
+  desktop:
+    # Match the runtime WM_CLASS/app_id (app.setName in the main process) so the
+    # window associates with this entry and shows its icon. electron-builder
+    # otherwise defaults StartupWMClass to productName, which doesn't match.
+    StartupWMClass: peerkit-video-chat
 deb:
   # Override the default postinst, which disables the SUID sandbox on hosts
   # where unprivileged user namespaces look usable at install time. Ubuntu
