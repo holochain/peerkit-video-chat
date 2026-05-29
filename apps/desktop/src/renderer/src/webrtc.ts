@@ -14,6 +14,10 @@ const pendingEoc = new Set<string>();
 const offererPeers = new Set<string>();
 // ICE restart attempts since last successful connection, per peer (RFC 8445 §9)
 const iceRestartAttempts = new Map<string, number>();
+// The outbound video RTCRtpSender per peer. We pre-negotiate a sendrecv video
+// m-line at call setup (even when the camera is off), so toggling the camera
+// mid-call is a track swap via replaceTrack — no renegotiation required.
+const videoSenders = new Map<string, RTCRtpSender>();
 
 let localStream: MediaStream | null = null;
 let preferredCameraId = '';
@@ -217,6 +221,31 @@ function buildPeerConnection(agentId: string): RTCPeerConnection {
   return pc;
 }
 
+/**
+ * Locate this peer's video transceiver, force it `sendrecv`, and remember its
+ * sender so the camera can be toggled later via `replaceTrack`. When no video
+ * m-line exists yet (camera off at setup) and `createIfMissing` is set, reserve
+ * one so the offer still negotiates a sendrecv video section up front.
+ */
+function trackVideoSender(
+  pc: RTCPeerConnection,
+  agentId: string,
+  createIfMissing: boolean,
+): void {
+  let tx = pc
+    .getTransceivers()
+    .find(
+      (t) =>
+        t.sender.track?.kind === "video" || t.receiver.track?.kind === "video",
+    );
+  if (tx === undefined && createIfMissing) {
+    tx = pc.addTransceiver("video", { direction: "sendrecv" });
+  }
+  if (tx === undefined) return;
+  if (tx.direction !== "sendrecv") tx.direction = "sendrecv";
+  videoSenders.set(agentId, tx.sender);
+}
+
 async function restartIce(agentId: string, pc: RTCPeerConnection): Promise<void> {
   try {
     const offer = await pc.createOffer({ iceRestart: true });
@@ -254,6 +283,9 @@ export async function initiateCall(toAgentId: string): Promise<void> {
   for (const track of stream.getTracks()) {
     pc.addTrack(track, stream);
   }
+  // Reserve a sendrecv video m-line even when the camera is off, so it can be
+  // enabled mid-call via replaceTrack without renegotiating.
+  trackVideoSender(pc, toAgentId, true);
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   await window.app.sendSignal(toAgentId, {
@@ -288,6 +320,9 @@ export async function handleSignal(
       pc.addTrack(track, stream);
     }
     await pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
+    // Match the offerer's reserved video m-line so we can enable our camera
+    // mid-call via replaceTrack (offer already carries a sendrecv video section).
+    trackVideoSender(pc, fromAgentId, false);
     // Drain any candidates that arrived before the offer (RFC 8829 §4.1.19)
     await drainPendingCandidates(pc, fromAgentId);
     const answer = await pc.createAnswer();
@@ -344,6 +379,7 @@ export function closePeer(agentId: string): void {
   pendingEoc.delete(agentId);
   offererPeers.delete(agentId);
   iceRestartAttempts.delete(agentId);
+  videoSenders.delete(agentId);
   stopSpeakingDetection(agentId);
   onRemoteStream?.(agentId, null);
 }
@@ -356,6 +392,7 @@ export function closeAll(): void {
   pendingEoc.clear();
   offererPeers.clear();
   iceRestartAttempts.clear();
+  videoSenders.clear();
   // Stop all remaining analyser nodes (includes local speaking detection).
   for (const agentId of [...analyserCleanup.keys()]) {
     stopSpeakingDetection(agentId);
@@ -371,22 +408,34 @@ export function setMuted(muted: boolean): void {
 }
 
 export async function setCamMuted(muted: boolean): Promise<void> {
-  if (localStream) {
-    const videoTracks = localStream.getVideoTracks();
-    if (videoTracks.length) {
-      videoTracks.forEach((t) => {
-        // If video track has been muted, stop video track and remove it.
-        if (muted) {
-          t.stop();
-          localStream?.removeTrack(t);
-        }
-      });
-    } else if (!muted) {
-      // If cam has been enabled but there are no video tracks (camera off),
-      // get a new video track and add it to the stream.
-      const videoConstraint = preferredCameraId ? { deviceId: { ideal: preferredCameraId } } : true;
-      const s = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
-      s.getVideoTracks().forEach((t) => localStream?.addTrack(t));
+  if (localStream === null) return;
+
+  if (muted) {
+    // Stop and drop the local video track (releases the camera) and stop
+    // sending to every peer. The pre-negotiated video m-lines stay in place
+    // so the camera can be turned back on without renegotiation.
+    for (const t of localStream.getVideoTracks()) {
+      t.stop();
+      localStream.removeTrack(t);
     }
+    for (const sender of videoSenders.values()) {
+      void sender.replaceTrack(null);
+    }
+    return;
   }
+
+  // Unmute: acquire a fresh video track, add it to the local stream for our own
+  // preview, and push it to every existing peer connection via replaceTrack so
+  // remote participants actually see the camera (the bug this guards against).
+  if (localStream.getVideoTracks().length > 0) return; // already on
+  const videoConstraint = preferredCameraId
+    ? { deviceId: { ideal: preferredCameraId } }
+    : true;
+  const s = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
+  const track = s.getVideoTracks()[0];
+  if (track === undefined) return;
+  localStream.addTrack(track);
+  await Promise.all(
+    [...videoSenders.values()].map((sender) => sender.replaceTrack(track)),
+  );
 }
