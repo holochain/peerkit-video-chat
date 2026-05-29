@@ -40,15 +40,40 @@ export function getLocalStream(): MediaStream | null {
 
 async function acquireLocalStream(): Promise<MediaStream> {
   if (localStream !== null) return localStream;
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: true,
-    });
-  } catch {
-    // Camera unavailable or permission denied — fall back to audio only.
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  // On macOS, trigger the OS-level TCC permission dialog before getUserMedia.
+  const access = await window.app.requestMediaAccess();
+
+  const stream = new MediaStream();
+
+  // Microphone — required. Throw with an actionable message if denied.
+  if (!access.microphone) {
+    throw new Error(
+      "Microphone access denied. Open System Settings → Privacy & Security → Microphone and allow access for this app.",
+    );
   }
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getAudioTracks().forEach((t) => stream.addTrack(t));
+  } catch (err) {
+    throw new Error(
+      err instanceof DOMException && err.name === "NotAllowedError"
+        ? "Microphone access denied. Open System Settings → Privacy & Security → Microphone and allow access for this app."
+        : "Microphone unavailable. Check that it is not in use by another app.",
+    );
+  }
+
+  // Camera — optional. Skip silently if denied or unavailable.
+  if (access.camera) {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true });
+      s.getVideoTracks().forEach((t) => stream.addTrack(t));
+    } catch {
+      // Camera unavailable — continue audio-only.
+    }
+  }
+
+  localStream = stream;
   return localStream;
 }
 
@@ -56,7 +81,9 @@ async function acquireLocalStream(): Promise<MediaStream> {
  * Acquire local media and start speaking detection for the local participant.
  * Returns the stream so the caller can attach it to a self-preview element.
  */
-export async function initLocalMedia(selfAgentId: string): Promise<MediaStream> {
+export async function initLocalMedia(
+  selfAgentId: string,
+): Promise<MediaStream> {
   const stream = await acquireLocalStream();
   stopSpeakingDetection(selfAgentId);
   startSpeakingDetection(selfAgentId, stream);
@@ -131,7 +158,10 @@ function buildPeerConnection(agentId: string): RTCPeerConnection {
     window.app
       .sendSignal(agentId, { kind: "ice", candidate: payload })
       .catch((err: unknown) => {
-        console.warn(`webrtc: ICE send to ${agentId.slice(0, 12)} failed:`, err);
+        console.warn(
+          `webrtc: ICE send to ${agentId.slice(0, 12)} failed:`,
+          err,
+        );
       });
   };
 
@@ -231,7 +261,9 @@ export async function handleSignal(
     try {
       init = JSON.parse(signal.candidate) as RTCIceCandidateInit;
     } catch {
-      console.warn(`webrtc: malformed ICE candidate from ${fromAgentId.slice(0, 12)}`);
+      console.warn(
+        `webrtc: malformed ICE candidate from ${fromAgentId.slice(0, 12)}`,
+      );
       return;
     }
     if (pc === undefined) {
@@ -280,8 +312,22 @@ export function setMuted(muted: boolean): void {
   });
 }
 
-export function setCamMuted(muted: boolean): void {
-  localStream?.getVideoTracks().forEach((t) => {
-    t.enabled = !muted;
-  });
+export async function setCamMuted(muted: boolean): Promise<void> {
+  if (localStream) {
+    const videoTracks = localStream.getVideoTracks();
+    if (videoTracks.length) {
+      videoTracks.forEach((t) => {
+        // If video track has been muted, stop video track and remove it.
+        if (muted) {
+          t.stop();
+          localStream?.removeTrack(t);
+        }
+      });
+    } else if (!muted) {
+      // If cam has been enabled but there are no video tracks (camera off),
+      // get a new video track and add it to the stream.
+      const s = await navigator.mediaDevices.getUserMedia({ video: true });
+      s.getVideoTracks().forEach((t) => localStream?.addTrack(t));
+    }
+  }
 }

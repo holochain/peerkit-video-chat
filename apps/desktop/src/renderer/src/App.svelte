@@ -231,8 +231,8 @@
     selfMic = audio;
     selfCam = video;
     setMuted(!audio);
-    setCamMuted(!video);
     try {
+      await setCamMuted(!video);
       await window.app.joinRoom(currentRoom!);
       joinTime = Date.now();
       screen = 'call';
@@ -254,13 +254,17 @@
   }
 
   function onToggleMic() {
+    setMuted(selfMic);
     selfMic = !selfMic;
-    setMuted(!selfMic);
   }
 
-  function onToggleCam() {
-    selfCam = !selfCam;
-    setCamMuted(!selfCam);
+  async function onToggleCam() {
+    try {
+      await setCamMuted(selfCam);
+      selfCam = !selfCam;
+    } catch (err) {
+      pushToast(toastMessage(err));
+    }
   }
 
   async function onSendChat(body: string) {
@@ -323,6 +327,7 @@
         onToggleVideo={onToggleCam}
         onJoin={onConfirmJoin}
         onBack={() => { currentRoom = null; screen = 'lobby'; }}
+        onError={(err) => pushToast(toastMessage(err))}
       />
     {:else if screen === 'call'}
       <CallScreen
