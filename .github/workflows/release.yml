@@ -163,29 +163,34 @@ jobs:
             Write-Output "---- msi log tail ----"; Get-Content $log -Tail 40
             Write-Error "msi install failed ($($proc.ExitCode))"; exit 1
           }
-          # The registry uninstall entry has no InstallLocation for this MSI, so
-          # derive the install dir from the verbose install log (ground truth),
-          # with the usual install roots as a fallback.
-          $candidates = @()
-          $candidates += Select-String -Path $log -Pattern '([A-Za-z]:\\[^\r\n";]*PeerKit-Video-Chat)' -AllMatches |
-            ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value }
-          $candidates += @(
-            "$env:ProgramFiles\PeerKit-Video-Chat",
-            "${env:ProgramFiles(x86)}\PeerKit-Video-Chat",
+          # The registry uninstall entry has no InstallLocation for this MSI.
+          # Check the known install roots (NOT the workspace — that holds the
+          # build output win-unpacked\, which would be a false positive) and
+          # accept the first that actually contains the installed exe.
+          $ws = $env:GITHUB_WORKSPACE
+          $roots = @(
+            "$env:LOCALAPPDATA\PeerKit-Video-Chat",
             "$env:LOCALAPPDATA\Programs\PeerKit-Video-Chat",
-            "$env:LOCALAPPDATA\PeerKit-Video-Chat"
+            "$env:ProgramFiles\PeerKit-Video-Chat",
+            "${env:ProgramFiles(x86)}\PeerKit-Video-Chat"
           )
-          $dir = $candidates | Sort-Object -Unique | Where-Object { Test-Path $_ } | Select-Object -First 1
+          $hasExe = {
+            param($d)
+            (Test-Path $d) -and ($d -notlike "$ws*") -and
+            (Get-ChildItem $d -Recurse -Filter '*.exe' -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match 'peerkit' } | Select-Object -First 1)
+          }
+          $dir = $roots | Where-Object { & $hasExe $_ } | Select-Object -First 1
           Write-Output "install dir: $dir"
-          $exe = if ($dir) {
-            Get-ChildItem $dir -Recurse -Filter '*.exe' -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -match 'peerkit' } | Select-Object -First 1
+          if (-not $dir) {
+            Write-Output "---- $env:LOCALAPPDATA ----"; Get-ChildItem $env:LOCALAPPDATA -Name
+            Write-Output "---- $env:ProgramFiles ----"; Get-ChildItem $env:ProgramFiles -Name
+            Write-Output "---- APPLICATIONFOLDER in msi log ----"
+            Select-String -Path $log -Pattern 'APPLICATIONFOLDER|APPDIR|INSTALLDIR' | Select-Object -First 15 | ForEach-Object { $_.Line }
+            Write-Error "installed exe not found in any known root"; exit 1
           }
-          if (-not $exe) {
-            Write-Output "---- PeerKit paths seen in msi log ----"
-            Select-String -Path $log -Pattern 'PeerKit-Video-Chat' | Select-Object -First 15 | ForEach-Object { $_.Line }
-            Write-Error "installed exe not found"; exit 1
-          }
+          $exe = Get-ChildItem $dir -Recurse -Filter '*.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'peerkit' } | Select-Object -First 1
           Write-Output "launching $($exe.FullName)"
           $p = Start-Process -FilePath $exe.FullName -PassThru
           Start-Sleep -Seconds 12
