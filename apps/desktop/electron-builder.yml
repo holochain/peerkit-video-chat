@@ -15,6 +15,16 @@ directories:
 # paths/filenames.
 artifactName: peerkit-video-chat-${version}-${arch}.${ext}
 executableName: peerkit-video-chat
+# Electron reads the Wayland window app_id from the bundled package.json "name"
+# at native startup (app.setName in the main process is too late to change it).
+# The workspace package is "@peerkit-video-chat/desktop", which Electron
+# normalizes to the app_id "peerkit-video-chat-desktop" — that doesn't match the
+# installed peerkit-video-chat.desktop, so GNOME can't map the window to its icon
+# on native Wayland. Override only the bundled name so the app_id becomes
+# "peerkit-video-chat" and the taskbar icon resolves. (Doesn't touch the
+# workspace package name or the CI `-w @peerkit-video-chat/desktop` references.)
+extraMetadata:
+  name: peerkit-video-chat
 # electron-vite emits the runnable app to out/; everything else is bundled in.
 files:
   - out/**/*
@@ -41,8 +51,10 @@ linux:
   # for the taskbar/dash (a lone 1024px icon isn't picked up).
   icon: build/icons
   desktop:
-    # Match the runtime WM_CLASS/app_id (app.setName in the main process) so the
-    # window associates with this entry and shows its icon. electron-builder
+    # Match the runtime app_id (the bundled package.json "name", pinned via
+    # extraMetadata above) so the window associates with this entry and shows its
+    # icon. Used as the X11 WM_CLASS hint under XWayland; under native Wayland
+    # GNOME matches the app_id to this file's basename. electron-builder
     # otherwise defaults StartupWMClass to productName, which doesn't match.
     StartupWMClass: peerkit-video-chat
 deb:

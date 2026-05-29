@@ -30,19 +30,15 @@ interface StoreSchema {
   devices: { camera: string; microphone: string; speaker: string };
 }
 
-// Pin a clean app name. Electron derives the Linux window identity from it
-// (WM_CLASS on X11, app_id on Wayland); without this it falls back to the
-// scoped package name "@peerkit-video-chat/desktop", which matches neither the
-// installed peerkit-video-chat.desktop nor its StartupWMClass, so the desktop
-// can't associate the window with its icon. Set before Store reads userData.
+// Clean, stable app name for the userData directory and window title. NOTE:
+// this does NOT control the Linux window identity used for taskbar icon
+// matching — on Wayland Electron reads the window app_id from the bundled
+// package.json "name" during native startup, before this JS runs. The packaged
+// build pins that name to "peerkit-video-chat" via electron-builder's
+// extraMetadata so the Wayland app_id matches the installed
+// peerkit-video-chat.desktop and the icon resolves. Set before Store reads
+// userData.
 app.setName("peerkit-video-chat");
-
-// Run under XWayland. Electron 42 auto-selects native Wayland on a Wayland
-// session, where the window has no WM_CLASS, so GNOME can't map it to its
-// installed .desktop/icon (and Vulkan is unsupported there). Under XWayland the
-// WM_CLASS (from app.setName) matches the .desktop StartupWMClass and the icon
-// resolves — the same path Electron apps like Discord/VS Code take by default.
-app.commandLine.appendSwitch("ozone-platform", "x11");
 
 const store = new Store<StoreSchema>();
 
