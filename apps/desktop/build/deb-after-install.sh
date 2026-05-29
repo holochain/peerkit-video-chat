@@ -33,3 +33,9 @@ fi
 if hash update-desktop-database 2>/dev/null; then
     update-desktop-database /usr/share/applications || true
 fi
+
+# Refresh the icon cache so the taskbar/dash picks up the app icon without a
+# re-login (electron-builder's default postinst doesn't do this).
+if hash gtk-update-icon-cache 2>/dev/null; then
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+fi

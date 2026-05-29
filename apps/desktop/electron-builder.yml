@@ -37,6 +37,9 @@ linux:
     - deb
   category: Network
   maintainer: Holochain
+  # Directory of <size>x<size>.png icons so the desktop has every size it needs
+  # for the taskbar/dash (a lone 1024px icon isn't picked up).
+  icon: build/icons
 deb:
   # Override the default postinst, which disables the SUID sandbox on hosts
   # where unprivileged user namespaces look usable at install time. Ubuntu
