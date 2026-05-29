@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   IncomingChat,
   NetworkRoomEntry,
+  PeerStats,
   RoomStateView,
   WebRtcSignal,
 } from "@peerkit-video-chat/core";
@@ -45,6 +46,17 @@ const api = {
     ipcRenderer.on("chat:networkRooms", listener);
     return () => {
       ipcRenderer.off("chat:networkRooms", listener);
+    };
+  },
+
+  getPeerStats: (): Promise<PeerStats | null> =>
+    ipcRenderer.invoke("chat:peerStats"),
+
+  onPeerStats: (handler: (stats: PeerStats) => void): (() => void) => {
+    const listener = (_event: unknown, stats: PeerStats): void => handler(stats);
+    ipcRenderer.on("chat:peerStats", listener);
+    return () => {
+      ipcRenderer.off("chat:peerStats", listener);
     };
   },
 

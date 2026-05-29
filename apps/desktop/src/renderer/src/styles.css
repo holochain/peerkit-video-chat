@@ -200,6 +200,54 @@ h1, h2, h3 {
   100% { box-shadow: 0 0 0 8px rgba(109, 198, 192, 0); }
 }
 
+/* ── Peers indicator (online count + connection breakdown) ─────── */
+
+.peers {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  cursor: default;
+  outline: none;
+}
+.peers:hover, .peers:focus-visible { border-color: var(--border-strong); }
+.peers svg { color: var(--accent); }
+.peers-count { color: var(--fg); font-weight: 600; }
+.peers-label { color: var(--fg-2); }
+
+.peers-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 150px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-1);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 40;
+}
+.peers:hover .peers-tip, .peers:focus-visible .peers-tip {
+  opacity: 1;
+  transform: translateY(0);
+}
+.peers-tip-row strong { color: var(--accent); }
+.peers-tip-sub { color: var(--fg-2); }
+
 /* ── Identity badge (persistent next to username) ─────────────── */
 
 .idbadge {

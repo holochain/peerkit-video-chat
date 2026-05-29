@@ -11,6 +11,19 @@ export interface NetworkRoomEntry {
   members: RosterEntry[];
 }
 
+/**
+ * Live peer connectivity, surfaced so the UI can show whether the node is
+ * actually reaching anyone. `discovered` counts agents known via the agent
+ * store (peers seen online); `connected` counts active transport links, split
+ * into `direct` and `relayed` (via PeerKit's {@link PeerkitNode.isDirectConnection}).
+ */
+export interface PeerStats {
+  discovered: number;
+  connected: number;
+  direct: number;
+  relayed: number;
+}
+
 export interface ChatNodeOptions {
   id?: string;
   bootstrapRelays: RelayAddress[];
@@ -18,6 +31,8 @@ export interface ChatNodeOptions {
   events: RoomEvents;
   /** Called whenever the observed set of active network rooms changes. */
   onNetworkRooms?: (rooms: NetworkRoomEntry[]) => void;
+  /** Called whenever peer connectivity changes (discovered/connected counts). */
+  onPeerStats?: (stats: PeerStats) => void;
 }
 
 export interface ChatNode {
@@ -25,6 +40,7 @@ export interface ChatNode {
   readonly room: Room;
   setDisplayName(name: string): void;
   sendSignal(toAgent: AgentId, signal: WebRtcSignal): Promise<void>;
+  getPeerStats(): PeerStats;
   shutDown(): Promise<void>;
 }
 
@@ -153,6 +169,29 @@ export async function startChatNode(
 
   let nodeRef: PeerkitNode | undefined;
 
+  function computePeerStats(node: PeerkitNode): PeerStats {
+    const self = node.keyPair.agentId();
+    const connected = node.getConnectedAgents().filter((a) => a !== self);
+    let direct = 0;
+    for (const a of connected) if (node.isDirectConnection(a)) direct++;
+    const discovered = new Set<AgentId>();
+    for (const info of node.agentStore.getAll()) {
+      if (info.agentId !== self) discovered.add(info.agentId);
+    }
+    return {
+      discovered: discovered.size,
+      connected: connected.length,
+      direct,
+      relayed: connected.length - direct,
+    };
+  }
+
+  function emitPeerStats(): void {
+    const node = nodeRef;
+    if (node === undefined || options.onPeerStats === undefined) return;
+    options.onPeerStats(computePeerStats(node));
+  }
+
   const builder = new PeerkitNodeBuilder({
     networkAccessHandler: async () => true,
     messageHandler: async (fromAgent, data) => {
@@ -172,11 +211,13 @@ export async function startChatNode(
     .withAgentsReceivedObserver((agentIds) => {
       const node = nodeRef;
       if (node === undefined) return;
+      emitPeerStats();
       for (const id of agentIds) void tryDialWithRetry(node, id);
     })
     .withPeerConnectedObserver(() => {
       // New peer connection: re-announce so they learn we're in the room.
       // Roster reconciliation happens via their roster reply (if they're also in the room).
+      emitPeerStats();
       roomRef.current?.reannounce();
     })
     .withPeerDisconnectedObserver((agentId) => {
@@ -190,6 +231,7 @@ export async function startChatNode(
         }
       }
       if (changed) emitNetworkRooms();
+      emitPeerStats();
       roomRef.current?.onPeerDisconnected(agentId);
     });
 
@@ -200,6 +242,12 @@ export async function startChatNode(
   const node = await builder.build();
   nodeRef = node;
   selfAgentId = node.keyPair.agentId();
+
+  // PeerKit emits no event when a relayed connection upgrades to a direct one,
+  // nor when agent-store records expire by TTL, so poll to keep the
+  // direct/relayed split and the discovered count fresh. (Upstream gap.)
+  const statsTimer = setInterval(emitPeerStats, 3000);
+  emitPeerStats();
 
   const transport: RoomTransport = {
     agentId: node.keyPair.agentId(),
@@ -247,7 +295,11 @@ export async function startChatNode(
     async sendSignal(toAgent: AgentId, signal: WebRtcSignal) {
       await room.sendSignal(toAgent, signal);
     },
+    getPeerStats() {
+      return computePeerStats(node);
+    },
     async shutDown() {
+      clearInterval(statsTimer);
       try {
         await room.leave();
       } catch {
