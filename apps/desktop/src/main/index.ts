@@ -61,6 +61,12 @@ async function createWindow(): Promise<void> {
     },
   );
 
+  // Runtime window/taskbar icon. Packaged builds carry it as an extraResource
+  // (see electron-builder.yml); in dev it sits in the build resources dir.
+  const iconPath = app.isPackaged
+    ? resolve(process.resourcesPath, "icon.png")
+    : resolve(__dirname, "../../build/icon.png");
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -69,6 +75,7 @@ async function createWindow(): Promise<void> {
     show: false,
     backgroundColor: "#0c0a18",
     title: "peerkit-video-chat (showcase)",
+    icon: iconPath,
     webPreferences: {
       preload: resolve(__dirname, "../preload/index.js"),
       contextIsolation: true,
