@@ -65,6 +65,46 @@ jobs:
             apps/desktop/release/*.pkg
             apps/desktop/release/*.msi
 
+      # Install the deb and launch the binary headless to catch crash-on-start
+      # regressions (missing libs, the SUID-sandbox mode, spaces in the install
+      # path breaking the zygote self-exec) that only surface from a real
+      # install. There's no UI to drive — we just assert it doesn't die on boot.
+      # --no-sandbox keeps it deterministic across runners; the SUID sandbox
+      # itself is validated by the postinst.
+      - name: Smoke-test Linux packages
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y xvfb ./apps/desktop/release/*.deb
+
+          smoke() {
+            local name="$1"; shift
+            echo "::group::smoke $name"
+            set +e
+            timeout 15 xvfb-run -a "$@" --no-sandbox >/tmp/smoke.log 2>&1
+            local code=$?
+            set -e
+            cat /tmp/smoke.log
+            echo "::endgroup::"
+            if grep -qiE "FATAL|execvp|core dumped|cannot open shared object|symbol lookup error" /tmp/smoke.log; then
+              echo "::error::$name crashed on launch"; return 1
+            fi
+            # 124 = killed by timeout (stayed alive = good); 0 = clean exit.
+            if [ "$code" -ne 124 ] && [ "$code" -ne 0 ]; then
+              echo "::error::$name exited $code on launch"; return 1
+            fi
+            echo "OK: $name survived launch"
+          }
+
+          # Installed deb binary (on PATH via /usr/bin symlink).
+          smoke "deb" peerkit-video-chat
+          # AppImage, extracted (CI runners have no FUSE).
+          appimage="$(ls apps/desktop/release/*.AppImage)"
+          chmod +x "$appimage"
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          smoke "AppImage" "$appimage"
+
   # Publish once, after every platform has packaged, so the release is created
   # a single time with the full set of installers (no concurrent-create race).
   release:
