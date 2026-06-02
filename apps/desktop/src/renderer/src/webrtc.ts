@@ -22,6 +22,12 @@ if (__TURN_PASSWORD__ && __TURN_REALM__) {
     username: "peerkit-video-chat-user",
     credential: __TURN_PASSWORD__,
   });
+} else {
+  // No TURN baked (dev build, or a release built without TURN_REALM/
+  // TURN_PASSWORD). Calls between peers that can't connect directly will fail.
+  console.warn(
+    "TURN not configured - running STUN-only; relayed calls will not work",
+  );
 }
 
 const peers = new Map<string, RTCPeerConnection>();
