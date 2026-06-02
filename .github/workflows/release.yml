@@ -85,9 +85,18 @@ jobs:
       - name: Package installers
         run: npm run ${{ matrix.script }} -w @peerkit-video-chat/desktop -- --publish never
         env:
-          # Unsigned builds for now — don't let electron-builder hunt for a
-          # signing identity on macOS.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # macOS: sign with the Developer ID Application cert and notarize.
+          # electron-builder imports the base64 .p12 (CSC_LINK) into a temp
+          # keychain itself, then notarizes via the APPLE_* credentials.
+          # CSC_LINK is scoped to macOS only — on Windows it would be read as a
+          # Windows signing cert and break the build. Linux/Windows stay
+          # unsigned (CSC_IDENTITY_AUTO_DISCOVERY=false, empty CSC_LINK).
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.os == 'macos-latest' && 'true' || 'false' }}
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.APPLE_CERTIFICATE || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID_EMAIL }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -97,7 +106,6 @@ jobs:
           path: |
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.deb
-            apps/desktop/release/*.pkg
             apps/desktop/release/*.dmg
             apps/desktop/release/*.msi
             apps/desktop/release/*.exe
@@ -156,40 +164,26 @@ jobs:
           export APPIMAGE_EXTRACT_AND_RUN=1
           smoke "AppImage" xvfb-run -a "$appimage"
 
-      # Install the pkg and launch the bundled binary; assert it stays up.
-      # The runner has a window server, and a locally-built app carries no
-      # com.apple.quarantine attribute, so Gatekeeper doesn't block it.
-      - name: Smoke-test macOS package
+      # Fail loudly if a build comes out unsigned or un-notarized (e.g. a
+      # missing secret) instead of silently shipping one Gatekeeper rejects.
+      - name: Verify macOS signing & notarization
         if: matrix.os == 'macos-latest'
         run: |
           set -euo pipefail
-          pkg="$(ls apps/desktop/release/*.pkg)"
-          sudo installer -pkg "$pkg" -target /
-          app_dir="$(ls -d /Applications/*.app | grep -i peerkit | head -1)"
-          bin="$app_dir/Contents/MacOS/$(ls "$app_dir/Contents/MacOS" | head -1)"
-          echo "binary: $bin"
-          test -x "$bin" || { echo "::error::installed binary missing"; exit 1; }
-          "$bin" >/tmp/smoke.log 2>&1 &
-          pid=$!
-          sleep 12
-          alive=0
-          kill -0 "$pid" 2>/dev/null && alive=1
-          kill -9 "$pid" 2>/dev/null || true
-          wait "$pid" 2>/dev/null || true
-          cat /tmp/smoke.log || true
-          if [ "$alive" -ne 1 ]; then
-            echo "::error::macOS app exited before finishing startup"; exit 1
+          app="$(ls -d apps/desktop/release/mac*/*.app | head -1)"
+          echo "verifying $app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          if ! codesign -dvv "$app" 2>&1 | grep -q "Authority=Developer ID Application"; then
+            echo "::error::app is not signed with a Developer ID Application certificate"; exit 1
           fi
-          if grep -qiE "dyld|Library not loaded|Symbol not found|Abort trap" /tmp/smoke.log; then
-            echo "::error::macOS crash signature on launch"; exit 1
-          fi
-          echo "OK: pkg survived launch"
+          # Notarization ticket must be stapled, and Gatekeeper must accept it.
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          echo "OK: signed with Developer ID and notarized"
 
-      # Mount the dmg and launch the .app directly from the mounted volume.
-      # A locally-built app carries no com.apple.quarantine attribute, so
-      # Gatekeeper doesn't block it. We don't copy to /Applications (the pkg
-      # smoke already put one there) — running from the volume is enough to
-      # prove the dmg's bundle launches.
+      # Mount the dmg and launch the .app directly from the mounted volume to
+      # confirm the packaged bundle boots. Running from the volume is enough; we
+      # don't need to drag it to /Applications.
       - name: Smoke-test macOS dmg
         if: matrix.os == 'macos-latest'
         run: |
@@ -303,7 +297,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           shopt -s globstar nullglob
-          files=(dist/**/*.AppImage dist/**/*.deb dist/**/*.pkg dist/**/*.dmg dist/**/*.msi dist/**/*.exe)
+          files=(dist/**/*.AppImage dist/**/*.deb dist/**/*.dmg dist/**/*.msi dist/**/*.exe)
           # Mark semver prerelease tags (v1.2.3-rc.1, v0.0.0-test.1, …) as
           # pre-releases so they don't become the repo's "Latest".
           prerelease=()
