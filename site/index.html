@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PeerKit Video Chat — peer-to-peer video calls</title>
+    <meta
+      name="description"
+      content="A peer-to-peer video chat app built to showcase PeerKit, a TypeScript P2P data synchronization framework. Live audio, video, and ephemeral text chat — no central server for your media."
+    />
+    <link rel="icon" type="image/png" href="favicon.png" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="PeerKit Video Chat" />
+    <meta
+      property="og:description"
+      content="Peer-to-peer video calls, built to showcase PeerKit."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="icon.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="PeerKit Video Chat home">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span class="brand-name">peerkit</span>
+        <span class="brand-slash">/</span>
+        <span>video-chat</span>
+      </a>
+      <nav class="topnav">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#download">Download</a>
+        <a
+          href="https://github.com/holochain/peerkit-video-chat"
+          rel="noopener"
+          >GitHub</a
+        >
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <img class="hero-icon" src="icon.png" alt="" width="112" height="112" />
+        <h1 class="font-display">Peer-to-peer video calls</h1>
+        <p class="hero-sub">
+          A small, focused showcase for
+          <a href="https://github.com/holochain/peerkit" rel="noopener"
+            >PeerKit</a
+          >
+          — a TypeScript peer-to-peer data synchronization framework. Live audio,
+          video, and ephemeral text chat, with no central server carrying your
+          media.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#download">Download</a>
+          <a
+            class="btn btn-ghost"
+            href="https://github.com/holochain/peerkit-video-chat"
+            rel="noopener"
+            >View source</a
+          >
+        </div>
+        <p class="hero-note font-mono">Linux · macOS · Windows</p>
+      </section>
+
+      <section id="features" class="section">
+        <h2 class="font-display">What it does</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>Live audio &amp; video</h3>
+            <p>
+              Real-time calls between participants over WebRTC, established
+              directly peer-to-peer where the network allows.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Ephemeral text chat</h3>
+            <p>
+              Messages are broadcast only while you are in the room. No history,
+              no replay, no catch-up for late joiners.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Rooms per deployment</h3>
+            <p>
+              An organization deploys an instance, issues credentials to its
+              members, and they create or join call rooms inside it.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Direct, with a fallback</h3>
+            <p>
+              Calls run STUN-only by default and fall back to a TURN relay only
+              when two peers cannot reach each other directly.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Self-hostable relay</h3>
+            <p>
+              Peer discovery runs through a PeerKit relay you can run yourself —
+              a thin rendezvous point, not a media server.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Resilient connections</h3>
+            <p>
+              A recovery ladder re-establishes dropped calls: ICE restart, then
+              a full rebuild, then a relay-only retry before giving up.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="how" class="section">
+        <h2 class="font-display">How it works</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-n font-mono">1</span>
+            <div>
+              <h3>Discover</h3>
+              <p>
+                Each app connects to a PeerKit relay and learns which other
+                members are online and which rooms are active.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span class="step-n font-mono">2</span>
+            <div>
+              <h3>Connect</h3>
+              <p>
+                Peers negotiate a direct WebRTC connection. The relay carries
+                only the signaling; your audio and video do not pass through it.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span class="step-n font-mono">3</span>
+            <div>
+              <h3>Call</h3>
+              <p>
+                Media flows peer-to-peer. If a direct path is impossible, a TURN
+                relay carries the encrypted media as a fallback.
+              </p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section id="download" class="section">
+        <h2 class="font-display">Download</h2>
+        <p class="section-sub">
+          Pre-built installers for every release are published on GitHub. Builds
+          are currently unsigned.
+        </p>
+        <div class="grid grid-3">
+          <a
+            class="card card-link"
+            href="https://github.com/holochain/peerkit-video-chat/releases/latest"
+            rel="noopener"
+          >
+            <h3>Linux</h3>
+            <p class="font-mono">.AppImage · .deb</p>
+          </a>
+          <a
+            class="card card-link"
+            href="https://github.com/holochain/peerkit-video-chat/releases/latest"
+            rel="noopener"
+          >
+            <h3>macOS</h3>
+            <p class="font-mono">.pkg</p>
+          </a>
+          <a
+            class="card card-link"
+            href="https://github.com/holochain/peerkit-video-chat/releases/latest"
+            rel="noopener"
+          >
+            <h3>Windows</h3>
+            <p class="font-mono">.msi</p>
+          </a>
+        </div>
+        <p class="section-sub">
+          Or build from source — see the
+          <a
+            href="https://github.com/holochain/peerkit-video-chat#running-locally"
+            rel="noopener"
+            >README</a
+          >.
+        </p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span class="brand">
+          <span class="brand-dot" aria-hidden="true"></span>
+          <span class="brand-name">peerkit</span>
+          <span class="brand-slash">/</span>
+          <span>video-chat</span>
+        </span>
+        <nav class="footer-links">
+          <a
+            href="https://github.com/holochain/peerkit-video-chat"
+            rel="noopener"
+            >Repository</a
+          >
+          <a href="https://github.com/holochain/peerkit" rel="noopener"
+            >PeerKit</a
+          >
+          <a
+            href="https://github.com/holochain/peerkit-video-chat/blob/main/docs/architecture.md"
+            rel="noopener"
+            >Architecture</a
+          >
+        </nav>
+        <p class="footer-note">A showcase for the PeerKit framework.</p>
+      </div>
+    </footer>
+  </body>
+</html>
