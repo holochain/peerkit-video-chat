@@ -237,6 +237,55 @@ function stopSpeakingDetection(agentId: string): void {
 // Peer connection management
 // ---------------------------------------------------------------------------
 
+/** Short, stable peer tag for log lines. */
+function tag(agentId: string): string {
+  return agentId.slice(0, 12);
+}
+
+/** Positive lifecycle log. Failures stay on console.warn at their call sites. */
+function logPeer(agentId: string, msg: string): void {
+  console.info(`webrtc: ${tag(agentId)} ${msg}`);
+}
+
+/**
+ * After a connection establishes, read the selected candidate pair and log the
+ * path type (host / srflx / relay) and round-trip time. The relay case is the
+ * signal to watch in multi-party tests — it means the direct path failed and we
+ * fell back through TURN. Best-effort; silent if stats are unavailable.
+ */
+async function logConnectedPath(agentId: string, pc: RTCPeerConnection): Promise<void> {
+  try {
+    const stats = await pc.getStats();
+    let pairType: string | undefined;
+    let rttMs: number | undefined;
+    const local = new Map<string, string>();
+    stats.forEach((r: { type?: string; id?: string; candidateType?: string }) => {
+      if (r.type === "local-candidate" && r.id && r.candidateType) {
+        local.set(r.id, r.candidateType);
+      }
+    });
+    stats.forEach(
+      (r: {
+        type?: string;
+        state?: string;
+        nominated?: boolean;
+        localCandidateId?: string;
+        currentRoundTripTime?: number;
+      }) => {
+        if (r.type === "candidate-pair" && r.state === "succeeded" && r.nominated) {
+          pairType = r.localCandidateId ? local.get(r.localCandidateId) : undefined;
+          if (r.currentRoundTripTime != null) rttMs = Math.round(r.currentRoundTripTime * 1000);
+        }
+      },
+    );
+    const path = pairType ?? "unknown";
+    const rtt = rttMs != null ? `, rtt=${rttMs}ms` : "";
+    logPeer(agentId, `connected via ${path}${path === "relay" ? " (TURN)" : ""}${rtt}`);
+  } catch {
+    logPeer(agentId, "connected (path stats unavailable)");
+  }
+}
+
 function buildPeerConnection(
   agentId: string,
   relayOnly = false,
@@ -297,7 +346,16 @@ function buildPeerConnection(
     const state = pc.connectionState;
     if (state === "connected") {
       // Fully established — clear the watchdog and reset the recovery ladder.
+      // Read the attempt counters before clearing: a non-zero count means this
+      // "connected" is the result of a recovery, not a first-time connect. The
+      // `recovering` guard is already cleared by the `connecting` handler, so it
+      // can't be used to detect that here.
+      const recovered =
+        (iceRestartAttempts.get(agentId) ?? 0) > 0 ||
+        (reconnectAttempts.get(agentId) ?? 0) > 0;
       clearRecoveryState(agentId);
+      if (recovered) logPeer(agentId, "recovered");
+      void logConnectedPath(agentId, pc);
       return;
     }
     // A successful (re)negotiation moving us back into checking clears the
@@ -339,6 +397,7 @@ async function recoverPeer(agentId: string, pc: RTCPeerConnection): Promise<void
 
   if (!offererPeers.has(agentId)) {
     // Acceptor: can't drive recovery. Wait for the offerer's recovery offer.
+    logPeer(agentId, "connection lost — awaiting peer's recovery offer (acceptor)");
     armAcceptorGiveup(agentId);
     return;
   }
@@ -346,6 +405,7 @@ async function recoverPeer(agentId: string, pc: RTCPeerConnection): Promise<void
   const iceTries = iceRestartAttempts.get(agentId) ?? 0;
   if (iceTries < MAX_ICE_RESTARTS) {
     iceRestartAttempts.set(agentId, iceTries + 1);
+    logPeer(agentId, `recovery: ICE restart ${iceTries + 1}/${MAX_ICE_RESTARTS}`);
     await restartIce(agentId, pc);
     armRecoveryTimeout(agentId);
     return;
@@ -358,12 +418,17 @@ async function recoverPeer(agentId: string, pc: RTCPeerConnection): Promise<void
     // new NAT mapping that connects). Subsequent attempts force relay-only when
     // TURN exists, for paths that connect ICE directly but can't carry media.
     const relayOnly = HAS_TURN && fullTries >= 1;
+    logPeer(
+      agentId,
+      `recovery: full reconnect ${fullTries + 1}/${MAX_FULL_RECONNECTS}${relayOnly ? " (relay-only)" : ""}`,
+    );
     await fullReconnect(agentId, relayOnly);
     armRecoveryTimeout(agentId);
     return;
   }
 
   // Ladder exhausted.
+  logPeer(agentId, "recovery exhausted — giving up, closing peer");
   closePeer(agentId);
 }
 
@@ -427,9 +492,6 @@ async function fullReconnect(agentId: string, relayOnly = false): Promise<void> 
   clearDtlsWatchdog(agentId);
   iceRestartAttempts.delete(agentId);
 
-  if (relayOnly) {
-    console.warn(`webrtc: forcing relay-only reconnect to ${agentId.slice(0, 12)}`);
-  }
   const pc = buildPeerConnection(agentId, relayOnly);
   for (const track of stream.getTracks()) {
     pc.addTrack(track, stream);
