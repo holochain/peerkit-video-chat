@@ -26,6 +26,8 @@ jobs:
           - os: windows-latest
             script: package:win
     runs-on: ${{ matrix.os }}
+    # TURN_PASSWORD secret + TURN_REALM variable live in this Actions environment.
+    environment: demo
     steps:
       - name: Check out
         uses: actions/checkout@v6
@@ -57,6 +59,13 @@ jobs:
 
       - name: Build desktop bundle
         run: npm run build -w @peerkit-video-chat/desktop
+        env:
+          # TURN realm + static long-term credential, baked into the renderer at
+          # build time (electron-vite `define`). Realm is the public FQDN (repo
+          # variable, shared with deploy.yml); password is a secret. Both absent
+          # on forks/non-secret runs — the client then falls back to STUN-only.
+          TURN_REALM: ${{ vars.TURN_REALM }}
+          TURN_PASSWORD: ${{ secrets.TURN_PASSWORD }}
 
       - name: Package installers
         run: npm run ${{ matrix.script }} -w @peerkit-video-chat/desktop -- --publish never

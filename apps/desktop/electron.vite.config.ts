@@ -42,6 +42,12 @@ export default defineConfig({
     plugins: [svelte()],
     define: {
       __APP_VERSION__: JSON.stringify(APP_VERSION),
+      // TURN realm (FQDN of the coturn server) and static long-term password.
+      // Both must be supplied explicitly at release time (no defaults — the
+      // deployment owns these values); absent in dev builds, where the client
+      // falls back to STUN-only.
+      __TURN_REALM__: JSON.stringify(process.env.TURN_REALM ?? ""),
+      __TURN_PASSWORD__: JSON.stringify(process.env.TURN_PASSWORD ?? ""),
     },
     build: {
       rollupOptions: {

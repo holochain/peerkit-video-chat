@@ -1,9 +1,28 @@
 import type { WebRtcSignal } from "@peerkit-video-chat/core";
 
+// Baked at build time by electron-vite `define` (see electron.vite.config.ts).
+// Both are "" for dev/unsigned builds with no TURN wired — then we run
+// STUN-only and skip the TURN entry entirely.
+declare const __TURN_REALM__: string;
+declare const __TURN_PASSWORD__: string;
+
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.services.mozilla.com" },
 ];
+
+if (__TURN_PASSWORD__ && __TURN_REALM__) {
+  ICE_SERVERS.push({
+    urls: [
+      `turn:${__TURN_REALM__}:3478?transport=udp`,
+      `turn:${__TURN_REALM__}:3478?transport=tcp`,
+      // turns over 443/tcp for peers behind firewalls that only permit 443
+      `turns:${__TURN_REALM__}:443?transport=tcp`,
+    ],
+    username: "peerkit-video-chat-user",
+    credential: __TURN_PASSWORD__,
+  });
+}
 
 const peers = new Map<string, RTCPeerConnection>();
 // ICE candidates that arrived before the offer was processed (RFC 8829 §4.1.19)
