@@ -101,6 +101,10 @@ a:hover {
   color: var(--fg);
   text-decoration: none;
 }
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+}
 
 /* ── Hero ────────────────────────────────────────────────── */
 .hero {
