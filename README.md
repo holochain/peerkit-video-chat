@@ -46,8 +46,8 @@ The desktop app discovers other peers through a PeerKit relay. During developmen
 npm install
 npm run build
 
-# Terminal 1 — start the local relay. It prints its dialable address
-# (and a ready-to-paste PEERKIT_RELAY_ADDR=... npm run dev:desktop line).
+# Terminal 1 — start the local relay. Its `relay ready` log line carries the
+# dialable multiaddr (the `multiaddrs` field) to paste below.
 npm run dev:relay
 
 # Terminal 2 — start a desktop window, pointing it at the address the relay
@@ -125,16 +125,21 @@ The relay binds to `0.0.0.0:9000` by default in production. Override with env va
 |---|---|---|
 | `RELAY_HOST` | `127.0.0.1` | Bind address (`0.0.0.0` to accept external connections) |
 | `RELAY_PORT` | `9000` | TCP port |
+| `RELAY_LOG_LEVEL` | `info` | Log verbosity (`debug`, `info`, `warning`, `error`) |
+| `RELAY_PUBLIC_HOST` | — | Public DNS name to announce as a `/dns4/<host>` multiaddr |
+| `RELAY_OTLP_ENDPOINT` | — | OTLP endpoint; metrics export is off unless set |
 
-On start the relay prints its address and a ready-to-paste client command:
+On start the relay emits structured JSON logs. The `relay ready` line carries
+the dialable multiaddr(s):
 
 ```
-peerkit relay listening
-  address: /ip4/0.0.0.0/tcp/9000/ws/p2p/<peer-id>
-  start a desktop window with: PEERKIT_RELAY_ADDR=/ip4/0.0.0.0/tcp/9000/ws npm run dev:desktop
+{"level":"INFO","message":"relay ready","properties":{"nodeId":"<peer-id>","multiaddrs":["/ip4/0.0.0.0/tcp/9000/ws/p2p/<peer-id>"]}}
 ```
 
-Replace `0.0.0.0` with the server's public IP when sharing `PEERKIT_RELAY_ADDR` with clients. The peer ID in the address line is informational; clients only need the transport portion (`/ip4/<host>/tcp/<port>/ws`).
+Point clients at it via `PEERKIT_RELAY_ADDR=<multiaddr> npm run dev:desktop`.
+Replace `0.0.0.0` with the server's public IP (or set `RELAY_PUBLIC_HOST`) when
+sharing the address with clients. The peer ID is informational; clients only
+need the transport portion (`/ip4/<host>/tcp/<port>/ws`).
 
 ## See also
 

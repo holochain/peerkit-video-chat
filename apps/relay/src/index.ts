@@ -1,7 +1,6 @@
 import { isIP } from "net";
 
-import { PeerkitRelayBuilder } from "@peerkit/peerkit";
-import { createRelay } from "@peerkit/transport-libp2p-nodejs";
+import { run, type RelayConfig } from "@peerkit/relay";
 
 const RELAY_HOST = process.env.RELAY_HOST ?? "127.0.0.1";
 
@@ -20,32 +19,29 @@ if (ipVersion === 0) {
 
 const LISTEN_ADDR = `/ip${ipVersion}/${RELAY_HOST}/tcp/${parsedPort}/ws`;
 
-async function main(): Promise<void> {
-  const relay = await new PeerkitRelayBuilder(async () => true)
-    .withId("peerkit-video-chat")
-    .withAddresses([LISTEN_ADDR])
-    .withTransportFactory(createRelay)
-    .build();
+// Optional OTLP export — only enabled when an endpoint is configured, so local
+// dev stays dependency-free while deployed relays emit metrics.
+const otlpEndpoint = process.env.RELAY_OTLP_ENDPOINT;
 
-  const nodeId = relay.transport.getNodeId();
-  const fullAddress = `${LISTEN_ADDR}/p2p/${nodeId}`;
+const config: RelayConfig = {
+  id: "peerkit-video-chat",
+  logLevel: process.env.RELAY_LOG_LEVEL ?? "info",
+  listenAddrs: [LISTEN_ADDR],
+  // Accept every peer: this is a public rendezvous relay with no allow-list.
+  // An empty access token pairs with the always-true handler below.
+  networkAccessBytes: new Uint8Array(),
+  networkAccessHandler: async () => true,
+  // When set, the relay announces a /dns4/<host> multiaddr so peers dial the
+  // public name instead of the bind address.
+  publicHost: process.env.RELAY_PUBLIC_HOST,
+  otel: otlpEndpoint
+    ? { otlpEndpoint, serviceVersion: process.env.RELAY_VERSION ?? "unknown" }
+    : undefined,
+};
 
-  process.stdout.write(
-    `peerkit relay listening\n  address: ${fullAddress}\n` +
-      `  start a desktop window with: PEERKIT_RELAY_ADDR=${LISTEN_ADDR} npm run dev:desktop\n`,
-  );
-
-  const shutdown = async (signal: string): Promise<void> => {
-    process.stdout.write(`\nreceived ${signal}, shutting down\n`);
-    await relay.shutDown();
-    process.exit(0);
-  };
-
-  process.on("SIGINT", () => void shutdown("SIGINT"));
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
-}
-
-main().catch((err) => {
+// run() wires logging, metrics, the agent store and SIGINT/SIGTERM shutdown,
+// then keeps the process alive via the libp2p listeners.
+run(config).catch((err) => {
   process.stderr.write(`relay failed to start: ${(err as Error).stack ?? String(err)}\n`);
   process.exit(1);
 });
