@@ -10,6 +10,7 @@ export type {
 } from "./envelope.js";
 
 export { Room, normalizeRoomName } from "./room.js";
+export { MESH_RECOMMENDED_MAX, exceedsMeshRecommendation } from "./mesh.js";
 export type {
   RoomStateView,
   IncomingChat,

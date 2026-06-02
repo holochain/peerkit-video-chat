@@ -8,6 +8,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./mesh": {
+      "import": "./dist/mesh.js",
+      "types": "./dist/mesh.d.ts"
     }
   },
   "scripts": {

@@ -18,6 +18,10 @@
   } from './webrtc.js';
   import { remoteStreams, speakingPeers } from './lib/stores.js';
   import type { PeerStats } from '@peerkit-video-chat/core';
+  import {
+    MESH_RECOMMENDED_MAX,
+    exceedsMeshRecommendation,
+  } from '@peerkit-video-chat/core/mesh';
 
   declare const __APP_VERSION__: string;
 
@@ -232,6 +236,25 @@
       unsubChat();
       unsubSignal();
     };
+  });
+
+  // Warn once when a room reaches the comfortable mesh ceiling; re-arm when it
+  // drops back below, so growing past the limit warns again but a steady large
+  // room doesn't nag on every roster update.
+  let meshWarned = false;
+  $effect(() => {
+    if (exceedsMeshRecommendation(roomMembers.length)) {
+      if (!meshWarned) {
+        meshWarned = true;
+        pushToast(
+          `${roomMembers.length} people in this room. Calls are smoothest with ` +
+            `${MESH_RECOMMENDED_MAX} or fewer — audio and video quality may drop beyond that.`,
+          'warn',
+        );
+      }
+    } else {
+      meshWarned = false;
+    }
   });
 
   // ── State machine handlers ──────────────────────────────────────
