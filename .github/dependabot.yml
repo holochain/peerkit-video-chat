@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Keep SHA-pinned GitHub Actions fresh. Dependabot reads the trailing
+  # `# vX` comment on each pinned `uses:` and opens PRs bumping the hash.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # npm workspaces — root lockfile covers all apps/* and packages/*.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # One PR per week for non-major bumps to cut review noise; majors stay
+      # separate so breaking changes get individual scrutiny.
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
