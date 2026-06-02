@@ -26,8 +26,11 @@ jobs:
           - os: windows-latest
             script: package:win
     runs-on: ${{ matrix.os }}
-    # TURN_PASSWORD secret + TURN_REALM variable live in this Actions environment.
-    environment: demo
+    # Dedicated environment holding the TURN_PASSWORD secret + TURN_REALM
+    # variable for baking into the bundle. Kept separate from `demo` (the
+    # relay/TURN droplet deploy target) so release packaging doesn't create
+    # deployment records that bury and inactivate the real demo deployment.
+    environment: release
     steps:
       - name: Check out
         uses: actions/checkout@v6
