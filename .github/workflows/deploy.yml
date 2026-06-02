@@ -85,14 +85,23 @@ jobs:
           # Comma-separated list of SSH key fingerprints (or IDs/names), one per
           # authorized operator. doctl --ssh-keys accepts the comma list as-is.
           SSH_KEYS: ${{ secrets.DO_SSH_KEY_FINGERPRINTS }}
+          REPO_REF: ${{ inputs.repo_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Resolve the ref being deployed to a full commit SHA so the droplet
+          # records exactly what it was built from.
+          sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${REPO_REF}" --jq '.sha')
+          echo "deploying commit ${sha}"
           id=$(doctl compute droplet create "$NAME" \
             --image ubuntu-24-04-x64 \
             --region "$REGION" --size "$SIZE" \
             --ssh-keys "$SSH_KEYS" \
+            --tag-names "peerkit,commit:${sha}" \
+            --enable-monitoring \
             --user-data-file user-data.yaml \
             --wait --no-header --format ID)
           echo "droplet_id=$id" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$sha" >> "$GITHUB_OUTPUT"
           ip=$(doctl compute droplet get "$id" --no-header --format PublicIPv4)
           echo "droplet_ip=$ip" >> "$GITHUB_OUTPUT"
 
@@ -173,9 +182,11 @@ jobs:
         env:
           IP: ${{ steps.create.outputs.droplet_ip }}
           ID: ${{ steps.create.outputs.droplet_id }}
+          SHA: ${{ steps.create.outputs.commit_sha }}
         run: |
           {
-            echo "Deployed droplet **$ID** ($IP)."
+            echo "Deployed droplet **$ID** ($IP) from commit \`$SHA\`."
+            echo "Tagged: \`peerkit\`, \`commit:$SHA\`. DO monitoring agent enabled."
             echo "DNS $REALM updated; coturn TLS enabled on 5349/443."
             echo ""
             echo "Old droplet (if any) was left running; delete it manually after verifying."
