@@ -134,7 +134,13 @@ jobs:
           IP: ${{ steps.create.outputs.droplet_ip }}
           NAME: ${{ env.REALM }}
         run: |
-          printf '%s' "$SSH_KEY" > key && chmod 600 key
+          # Trailing newline is required — OpenSSH rejects a key file without
+          # one ("error in libcrypto"). Validate it parses before using it.
+          printf '%s\n' "$SSH_KEY" > key && chmod 600 key
+          if ! ssh-keygen -y -f key >/dev/null 2>&1; then
+            echo "::error::DO_SSH_PRIVATE_KEY is not a valid OpenSSH private key"
+            exit 1
+          fi
           ssh_opts="-i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
           remote() { ssh $ssh_opts "root@${IP}" "$@"; }
           # Block until first-boot provisioning has finished installing coturn.
