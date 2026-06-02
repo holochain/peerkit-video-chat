@@ -190,11 +190,6 @@ a:hover {
   margin: 0 0 1.6rem;
   max-width: 640px;
 }
-.section-sub strong {
-  color: var(--fg);
-  font-weight: 600;
-}
-
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -316,10 +311,10 @@ a:hover {
   border-color: #b794ff;
   color: #1a1033;
 }
-.dl-fallback {
-  margin-top: auto;
+.dl-all {
+  margin: 1.4rem 0 0;
   color: var(--fg-2);
-  font-size: 0.86rem;
+  font-size: 0.9rem;
 }
 
 /* ── Steps ───────────────────────────────────────────────── */
