@@ -51,9 +51,11 @@ function emit(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
 }
 
-// Baked-in relay so packaged builds work out of the box. Override at runtime
-// with PEERKIT_RELAY_ADDR (e.g. to point at a local dev relay).
-const DEFAULT_RELAY_ADDR = "/ip4/178.62.198.220/tcp/9000/ws";
+// Baked-in relay so packaged builds work out of the box. A DNS name (not a raw
+// IP) so it survives immutable droplet redeploys, which change the IP. Override
+// at runtime with PEERKIT_RELAY_ADDR (e.g. to point at a local dev relay).
+const DEFAULT_RELAY_ADDR =
+  "/dns4/peerkit-video-chat-demo.holochain.org/tcp/9000/ws";
 
 function getRelayAddress(): string {
   const addr = process.env["PEERKIT_RELAY_ADDR"]?.trim();
