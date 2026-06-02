@@ -320,3 +320,70 @@ describe("Room membership edges", () => {
     expect(room.getStateView()).toEqual({ kind: "idle" });
   });
 });
+
+describe("Room convergence edges", () => {
+  let transport: ReturnType<typeof makeTransport>;
+  let events: ReturnType<typeof makeEvents>;
+  let room: Room;
+
+  beforeEach(async () => {
+    transport = makeTransport();
+    events = makeEvents();
+    room = new Room(transport, events, "Me");
+    await room.join("lobby");
+    transport.broadcast.mockClear();
+    transport.sendTo.mockClear();
+    events.onState.mockClear();
+    events.onSignal.mockClear();
+  });
+
+  const join = (from: string, displayName: string, roomName = "lobby"): Envelope => ({
+    v: 1,
+    type: MsgType.RoomJoin,
+    from,
+    room: roomName,
+    ts: 1,
+    displayName,
+  });
+
+  it("a peer re-joining updates its name without duplicating the roster entry", () => {
+    room.onIncoming(join("peer1", "Peer"), "peer1");
+    room.onIncoming(join("peer1", "Peer Renamed"), "peer1");
+    const view = events.onState.mock.lastCall?.[0];
+    const peer1 = view.members.filter((m: { agentId: string }) => m.agentId === "peer1");
+    expect(peer1).toEqual([{ agentId: "peer1", displayName: "Peer Renamed" }]);
+  });
+
+  it("a roster that adds nothing new does not re-emit state", () => {
+    room.onIncoming(join("peer1", "Peer"), "peer1");
+    events.onState.mockClear();
+    room.onIncoming(
+      {
+        v: 1,
+        type: MsgType.RoomRoster,
+        from: "peer1",
+        room: "lobby",
+        ts: 2,
+        members: [
+          { agentId: SELF, displayName: "Me" },
+          { agentId: "peer1", displayName: "Peer" },
+        ],
+      },
+      "peer1",
+    );
+    expect(events.onState).not.toHaveBeenCalled();
+  });
+
+  it("drops a WebRTC signal addressed to a different room", () => {
+    room.onIncoming(
+      { v: 1, type: MsgType.WebRtcOffer, from: "peer1", room: "other", ts: 1, sdp: "o" },
+      "peer1",
+    );
+    expect(events.onSignal).not.toHaveBeenCalled();
+  });
+
+  it("ignores a leave for a peer that never joined", () => {
+    room.onIncoming({ v: 1, type: MsgType.RoomLeave, from: "ghost", room: "lobby", ts: 1 }, "ghost");
+    expect(events.onState).not.toHaveBeenCalled();
+  });
+});
