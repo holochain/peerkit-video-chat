@@ -49,6 +49,7 @@
   let selfName = $state('');
   let selfAgentId = $state('');
   let relayAddr = $state('');
+  let relayConnected = $state(false);
   let peerStats = $state<PeerStats | null>(null);
   let currentRoom = $state<string | null>(null);
   let joinTime = $state(0);
@@ -198,6 +199,10 @@
       peerStats = stats;
     });
 
+    const unsubRelayConnected = window.app.onRelayConnected((connected) => {
+      relayConnected = connected;
+    });
+
     const unsubChat = window.app.onChat((incoming) => {
       // skip echo of own messages — we add them optimistically in onSendChat
       if (incoming.from === selfAgentId) return;
@@ -223,6 +228,7 @@
       unsubState();
       unsubNetworkRooms();
       unsubPeerStats();
+      unsubRelayConnected();
       unsubChat();
       unsubSignal();
     };
@@ -237,6 +243,7 @@
       const result = await window.app.init(name);
       selfAgentId = result.agentId;
       relayAddr = result.relayAddr;
+      relayConnected = result.relayConnected;
       void window.app.getPeerStats().then((s) => { if (s) peerStats = s; });
       if (result.room.kind === 'inRoom') {
         // The chat node was already in a room — the renderer reloaded while a
@@ -360,6 +367,7 @@
       {selfName}
       {selfAgentId}
       {relayAddr}
+      {relayConnected}
       {peerStats}
       {themePref}
       {onSetTheme}

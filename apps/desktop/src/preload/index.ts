@@ -11,8 +11,12 @@ import type {
 const api = {
   init: (
     displayName: string,
-  ): Promise<{ agentId: string; relayAddr: string; room: RoomStateView }> =>
-    ipcRenderer.invoke("chat:init", displayName),
+  ): Promise<{
+    agentId: string;
+    relayAddr: string;
+    relayConnected: boolean;
+    room: RoomStateView;
+  }> => ipcRenderer.invoke("chat:init", displayName),
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke("app:openExternal", url),
   requestMediaAccess: (): Promise<{ camera: boolean; microphone: boolean }> =>
@@ -57,6 +61,17 @@ const api = {
     ipcRenderer.on("chat:peerStats", listener);
     return () => {
       ipcRenderer.off("chat:peerStats", listener);
+    };
+  },
+
+  getRelayConnected: (): Promise<boolean> =>
+    ipcRenderer.invoke("chat:relayConnected"),
+
+  onRelayConnected: (handler: (connected: boolean) => void): (() => void) => {
+    const listener = (_event: unknown, connected: boolean): void => handler(connected);
+    ipcRenderer.on("chat:relayConnected", listener);
+    return () => {
+      ipcRenderer.off("chat:relayConnected", listener);
     };
   },
 

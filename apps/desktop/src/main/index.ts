@@ -46,6 +46,10 @@ let chat: ChatNode | undefined;
 let chatInit: Promise<ChatNode> | undefined;
 let mainWindow: BrowserWindow | undefined;
 let relayAddr: string | undefined;
+// Whether the node has reached a bootstrap relay. Tracked here (not just
+// emitted) so chat:init can report the current value to a renderer that
+// subscribes after the connect event has already fired.
+let relayConnected = false;
 
 function emit(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
@@ -119,6 +123,10 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
         onNetworkRooms: (rooms: NetworkRoomEntry[]) =>
           emit("chat:networkRooms", rooms),
         onPeerStats: (stats: PeerStats) => emit("chat:peerStats", stats),
+        onRelayConnected: () => {
+          relayConnected = true;
+          emit("chat:relayConnected", true);
+        },
       });
     }
     chat = await chatInit;
@@ -129,11 +137,13 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
   return {
     agentId: chat.agentId,
     relayAddr: relayAddr ?? "",
+    relayConnected,
     room: chat.room.getStateView(),
   };
 });
 
 ipcMain.handle("chat:peerStats", () => chat?.getPeerStats() ?? null);
+ipcMain.handle("chat:relayConnected", () => relayConnected);
 
 ipcMain.handle("chat:setDisplayName", (_event, name: string) => {
   if (chat === undefined) throw new Error("chat node not initialized");

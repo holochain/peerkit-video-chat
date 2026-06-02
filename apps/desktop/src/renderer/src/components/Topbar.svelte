@@ -11,6 +11,7 @@
     selfName,
     selfAgentId,
     relayAddr,
+    relayConnected,
     peerStats,
     themePref,
     onSetTheme,
@@ -20,6 +21,7 @@
     selfName: string;
     selfAgentId: string;
     relayAddr: string;
+    relayConnected: boolean;
     peerStats: PeerStats | null;
     themePref: 'system' | 'light' | 'dark';
     onSetTheme: (pref: 'system' | 'light' | 'dark') => void;
@@ -72,11 +74,13 @@
   {/if}
 
   <div class="net-status">
-    <span class="pulse" class:pulse--off={!relayAddr}></span>
-    {#if relayAddr}
+    <span class="pulse" class:pulse--off={!relayConnected}></span>
+    {#if !relayAddr}
+      <span>disconnected</span>
+    {:else if relayConnected}
       <span>connected · {relayDisplay}</span>
     {:else}
-      <span>disconnected</span>
+      <span>connecting · {relayDisplay}</span>
     {/if}
   </div>
 
