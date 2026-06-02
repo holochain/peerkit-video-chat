@@ -75,6 +75,13 @@ jobs:
           s=${s//__REALM__/$REALM}
           s=${s//__TURN_PASSWORD__/$TURN_PASSWORD}
           printf '%s\n' "$s" > user-data.yaml
+          # cloud-init's YAML loader rejects non-ASCII bytes (e.g. a stray
+          # em-dash or an exotic password char) and silently drops the whole
+          # config. Fail here instead, with a pointer to the offending byte.
+          if LC_ALL=C grep -nP '[^\x00-\x7F]' user-data.yaml; then
+            echo "::error::rendered user-data contains non-ASCII bytes; cloud-init would reject it"
+            exit 1
+          fi
 
       - name: Create droplet
         id: create

@@ -4,7 +4,7 @@
 #   - a coturn TURN/STUN server (systemd unit: coturn)
 #
 # This sets machine state ONCE at first boot. There is no day-2 config
-# management — to change config, redeploy from an edited copy (the deploy
+# management - to change config, redeploy from an edited copy (the deploy
 # workflow does the substitution). See infra/README.md.
 #
 # TLS is NOT handled here. coturn comes up plain (3478) at boot; the deploy
@@ -12,10 +12,11 @@
 # DNS-01 in CI, delivers it over SSH, and enables the TLS listeners. This keeps
 # the Cloudflare token off the droplet.
 #
-# The deploy workflow substitutes:
-#   __REPO_REF__       git branch/tag to build the relay from
-#   __REALM__          TURN realm (the server FQDN)
-#   __TURN_PASSWORD__  static long-term TURN credential (from a GitHub secret)
+# The deploy workflow substitutes these placeholders (names written without the
+# surrounding underscores here so they aren't themselves replaced in this note):
+#   REPO_REF       git branch/tag to build the relay from
+#   REALM          TURN realm (the server FQDN)
+#   TURN_PASSWORD  static long-term TURN credential (from a GitHub secret)
 # external-ip is filled automatically from DO metadata at boot.
 
 packages:
@@ -85,10 +86,10 @@ write_files:
       realm=__REALM__
       user=peerkit-video-chat-user:__TURN_PASSWORD__
 
-      # Public IP — filled from DO metadata at boot
+      # Public IP - filled from DO metadata at boot
       external-ip=__EXTERNAL_IP__
 
-      # Relay UDP port range — MUST match the firewall rule below
+      # Relay UDP port range - MUST match the firewall rule below
       min-port=49152
       max-port=65535
 
@@ -133,7 +134,7 @@ runcmd:
   - cd /opt/peerkit-video-chat && sudo -u peerkit HOME=/var/lib/peerkit npm run build
 
   # --- coturn external-ip from DO metadata + log dir ---
-  # Fail the boot if the metadata lookup is empty — a blank external-ip makes
+  # Fail the boot if the metadata lookup is empty - a blank external-ip makes
   # coturn advertise bad relay candidates. The deploy's `cloud-init status
   # --wait` then surfaces this as a hard failure.
   - |
