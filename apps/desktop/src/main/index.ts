@@ -52,7 +52,12 @@ let relayAddr: string | undefined;
 let relayConnected = false;
 
 function emit(channel: string, payload: unknown): void {
-  mainWindow?.webContents.send(channel, payload);
+  // Background timers (e.g. the PeerKit peer-stats interval) can fire during
+  // quit, after the window's webContents is gone but before chat.shutDown()
+  // finishes. `?.` only guards undefined, not a destroyed window — sending to
+  // destroyed webContents throws "Object has been destroyed".
+  if (mainWindow === undefined || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(channel, payload);
 }
 
 // Baked-in relay so packaged builds work out of the box. A DNS name (not a raw
@@ -95,6 +100,11 @@ async function createWindow(): Promise<void> {
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
+  });
+
+  // Drop the reference once the window is gone so emit() short-circuits.
+  mainWindow.on("closed", () => {
+    mainWindow = undefined;
   });
 
   if (process.env["ELECTRON_RENDERER_URL"] !== undefined) {
