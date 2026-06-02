@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://holochain.github.io/peerkit-video-chat/sitemap.xml
