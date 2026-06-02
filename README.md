@@ -61,6 +61,25 @@ relay other than the local dev one.
 
 In each desktop window: set a display name, type the same room name in both, and start chatting. Roster updates as peers join and leave.
 
+### TURN (optional for local builds)
+
+You do **not** need TURN to run or test the app locally — calls run STUN-only,
+which is fine for development and for peers that can reach each other directly.
+
+To also exercise the TURN relay path locally (e.g. peers that can't connect
+directly), export the same values the release uses before building, then the
+credentials get baked into the renderer:
+
+```sh
+export TURN_REALM=<turn-server-fqdn>
+export TURN_PASSWORD=<turn-password>
+npm run build -w @peerkit-video-chat/desktop
+```
+
+Without them the client logs `TURN not configured` and stays STUN-only. The
+packaged release bakes these from the `TURN_REALM` variable and `TURN_PASSWORD`
+secret (see `infra/README.md`).
+
 ## Packaging
 
 `electron-builder` produces installers for all three desktop platforms:

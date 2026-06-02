@@ -67,6 +67,18 @@ jobs:
           TURN_REALM: ${{ vars.TURN_REALM }}
           TURN_PASSWORD: ${{ secrets.TURN_PASSWORD }}
 
+      # Catch a silent STUN-only mis-bake: if the secret is present, the bundle
+      # must contain a turns: entry. Skipped on forks where the secret is empty.
+      - name: Verify TURN baked into the bundle
+        shell: bash
+        env:
+          TURN_PASSWORD: ${{ secrets.TURN_PASSWORD }}
+        run: |
+          if [ -n "$TURN_PASSWORD" ] && ! grep -rq 'turns:' apps/desktop/out/renderer/assets/; then
+            echo "::error::TURN_PASSWORD is set but no turns: entry was baked into the bundle"
+            exit 1
+          fi
+
       - name: Package installers
         run: npm run ${{ matrix.script }} -w @peerkit-video-chat/desktop -- --publish never
         env:
