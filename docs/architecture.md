@@ -36,17 +36,19 @@ Responsibilities:
 - Ephemeral chat state for the current room. Participants only see messages broadcast while they are present; no catch-up, no persistence.
 - PeerKit lifecycle wiring: initialization, network access handshake, agent discovery, application message routing.
 
-### `packages/media`
+### `packages/media` (planned)
 
-A thin adapter exposing a single TypeScript surface backed by the platform's WebRTC implementation: Chromium's built-in WebRTC on Electron, and `react-native-webrtc` on React Native. Owns `RTCPeerConnection` setup, simulcast configuration and bandwidth-adaptive bitrate. Code that touches `RTCPeerConnection` directly lives here and nowhere else, so the same call logic in `packages/core` runs on both platforms.
+The intended home for the WebRTC media layer: a thin adapter exposing a single TypeScript surface backed by the platform's WebRTC implementation — Chromium's built-in WebRTC on Electron, and `react-native-webrtc` on React Native — owning `RTCPeerConnection` setup, simulcast configuration and bandwidth-adaptive bitrate, so the same call logic in `packages/core` runs on both platforms.
+
+Not yet extracted. Today the media layer lives in the desktop renderer (`apps/desktop/src/renderer/src/webrtc.ts`) and is Chromium-specific. It will be split into this package as the first step of the mobile work, once the surface can be validated against a second (React Native) consumer. See [#43](https://github.com/holochain/peerkit-video-chat/issues/43).
 
 ### `apps/desktop`
 
 Electron application. Uses the `@peerkit/transport-libp2p-nodejs` PeerKit transport. A desktop instance is a full PeerKit peer and can establish direct libp2p connections to other peers when the network permits.
 
-### `apps/mobile`
+### `apps/mobile` (planned)
 
-React Native application. Uses the planned `@peerkit/transport-libp2p-react-native` PeerKit transport. Mobile peers reach other peers through a circuit-relay and upgrade to direct connections where NAT allows.
+A React Native application, not yet built. It will use the planned `@peerkit/transport-libp2p-react-native` PeerKit transport; mobile peers reach other peers through a circuit-relay and upgrade to direct connections where NAT allows. Depends on upstream work — see [#43](https://github.com/holochain/peerkit-video-chat/issues/43).
 
 ## Networking model
 
@@ -105,5 +107,5 @@ The intended reuse boundary is:
 | Layer | Shared between desktop and mobile? |
 |---|---|
 | `packages/core` (state machines, signaling, chat, PeerKit wiring) | Fully shared |
-| `packages/media` (shared JS surface; platform-specific implementations selected at build time via package `exports` conditions) | Fully shared |
+| `packages/media` (planned — shared JS surface; platform-specific implementations selected at build time via package `exports` conditions) | Fully shared (once extracted) |
 | Presentation layer | Per-platform |

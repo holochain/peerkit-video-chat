@@ -25,20 +25,19 @@ The codebase is laid out as a TypeScript monorepo. The bulk of the application �
 ```text
 peerkit-video-chat/
 ├── apps/
-│   ├── desktop/         Electron application
-│   ├── mobile/          React Native application
+│   ├── desktop/         Electron application. The WebRTC media layer lives
+│   │                    in its renderer for now.
 │   └── relay/           PeerKit relay — rendezvous point for peer discovery
 ├── packages/
-│   ├── core/            Business logic. Room and call state machines,
-│   │                    signaling protocol over PeerKit messages,
-│   │                    ephemeral text chat. Zero platform dependencies.
-│   └── media/           Thin WebRTC adapter. Same JS surface, backed
-│                        by Chromium WebRTC on desktop and
-│                        react-native-webrtc on mobile.
+│   └── core/            Business logic. Room and call state machines,
+│                        signaling protocol over PeerKit messages,
+│                        ephemeral text chat. Zero platform dependencies.
 └── docs/                Architecture and design notes.
 ```
 
-`apps/desktop` and `apps/mobile` are a thin presentation layer: capture and render UI, plumb permissions, wire up the platform-specific PeerKit transport. The rest of the application lives in `packages/core`.
+`apps/desktop` is a thin presentation layer: capture and render UI, plumb permissions, wire up the platform-specific PeerKit transport. The rest of the application lives in `packages/core`.
+
+A React Native mobile app and a shared `packages/media` WebRTC adapter (extracted from the desktop renderer) are planned but not yet built — both depend on upstream PeerKit work. See [#43](https://github.com/holochain/peerkit-video-chat/issues/43).
 
 ## Running locally
 
