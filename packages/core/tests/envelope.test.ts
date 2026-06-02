@@ -81,6 +81,7 @@ describe("decode validation", () => {
     expect(decode(raw.encode({ ...base, type: MsgType.RoomJoin }))).toBeNull();
     expect(decode(raw.encode({ ...base, type: MsgType.ChatMsg }))).toBeNull();
     expect(decode(raw.encode({ ...base, type: MsgType.WebRtcOffer }))).toBeNull();
+    expect(decode(raw.encode({ ...base, type: MsgType.WebRtcAnswer }))).toBeNull();
     expect(decode(raw.encode({ ...base, type: MsgType.WebRtcIce }))).toBeNull();
   });
 
