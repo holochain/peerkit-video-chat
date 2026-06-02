@@ -98,7 +98,9 @@ jobs:
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.deb
             apps/desktop/release/*.pkg
+            apps/desktop/release/*.dmg
             apps/desktop/release/*.msi
+            apps/desktop/release/*.exe
 
       # Install the deb and launch the binary headless to catch crash-on-start
       # regressions (missing libs, the SUID-sandbox mode, spaces in the install
@@ -183,6 +185,39 @@ jobs:
           fi
           echo "OK: pkg survived launch"
 
+      # Mount the dmg and launch the .app directly from the mounted volume.
+      # A locally-built app carries no com.apple.quarantine attribute, so
+      # Gatekeeper doesn't block it. We don't copy to /Applications (the pkg
+      # smoke already put one there) — running from the volume is enough to
+      # prove the dmg's bundle launches.
+      - name: Smoke-test macOS dmg
+        if: matrix.os == 'macos-latest'
+        run: |
+          set -euo pipefail
+          dmg="$(ls apps/desktop/release/*.dmg)"
+          echo "mounting $dmg"
+          mp="$(mktemp -d)"
+          hdiutil attach "$dmg" -nobrowse -mountpoint "$mp"
+          app_dir="$(ls -d "$mp"/*.app | head -1)"
+          bin="$app_dir/Contents/MacOS/$(ls "$app_dir/Contents/MacOS" | head -1)"
+          echo "binary: $bin"
+          "$bin" >/tmp/smoke-dmg.log 2>&1 &
+          pid=$!
+          sleep 12
+          alive=0
+          kill -0 "$pid" 2>/dev/null && alive=1
+          kill -9 "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          cat /tmp/smoke-dmg.log || true
+          hdiutil detach "$mp" >/dev/null 2>&1 || true
+          if [ "$alive" -ne 1 ]; then
+            echo "::error::macOS dmg app exited before finishing startup"; exit 1
+          fi
+          if grep -qiE "dyld|Library not loaded|Symbol not found|Abort trap" /tmp/smoke-dmg.log; then
+            echo "::error::macOS dmg crash signature on launch"; exit 1
+          fi
+          echo "OK: dmg survived launch"
+
       # Install the msi silently and launch the installed exe; assert it stays up.
       - name: Smoke-test Windows package
         if: matrix.os == 'windows-latest'
@@ -222,6 +257,31 @@ jobs:
           Stop-Process -Id $p.Id -Force
           Write-Output "OK: msi survived launch"
 
+      # Silently install the NSIS exe (per-user, no admin) and launch the
+      # installed binary; assert it stays up. runAfterFinish is disabled in
+      # electron-builder.yml so /S doesn't auto-launch behind our back.
+      - name: Smoke-test Windows nsis exe
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem apps/desktop/release/*.exe | Select-Object -First 1
+          Write-Output "installing $($exe.Name)"
+          Start-Process -FilePath $exe.FullName -ArgumentList '/S' -Wait
+          # oneClick per-user install lands in %LOCALAPPDATA%\Programs\<name>.
+          $base = Join-Path $env:LOCALAPPDATA 'Programs'
+          $app = Get-ChildItem $base -Recurse -Filter 'peerkit-video-chat.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $app) {
+            Write-Output "contents of $base :"; Get-ChildItem $base -Recurse -Filter '*.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+            Write-Error "installed exe not found under $base"; exit 1
+          }
+          Write-Output "launching $($app.FullName)"
+          $p = Start-Process -FilePath $app.FullName -PassThru
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { Write-Error "nsis app exited before startup (code $($p.ExitCode))"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+          Write-Output "OK: nsis exe survived launch"
+
   # Publish once, after every platform has packaged, so the release is created
   # a single time with the full set of installers (no concurrent-create race).
   release:
@@ -243,7 +303,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           shopt -s globstar nullglob
-          files=(dist/**/*.AppImage dist/**/*.deb dist/**/*.pkg dist/**/*.msi)
+          files=(dist/**/*.AppImage dist/**/*.deb dist/**/*.pkg dist/**/*.dmg dist/**/*.msi dist/**/*.exe)
           # Mark semver prerelease tags (v1.2.3-rc.1, v0.0.0-test.1, …) as
           # pre-releases so they don't become the repo's "Latest".
           prerelease=()
