@@ -1,22 +1,22 @@
 #cloud-config
 # One-shot provisioning for a DigitalOcean droplet running BOTH:
 #   - the PeerKit relay (systemd unit: peerkit-relay)
-#   - a coturn TURN/STUN server (systemd unit: coturn) with Let's Encrypt TLS
+#   - a coturn TURN/STUN server (systemd unit: coturn)
 #
 # This sets machine state ONCE at first boot. There is no day-2 config
-# management — to change config, redeploy from an edited copy of this file
-# (the deploy workflow does the substitution). See infra/README.md.
+# management — to change config, redeploy from an edited copy (the deploy
+# workflow does the substitution). See infra/README.md.
 #
-# The deploy workflow (.github/workflows/deploy.yml) substitutes:
+# TLS is NOT handled here. coturn comes up plain (3478) at boot; the deploy
+# workflow (.github/workflows/deploy.yml) issues a Let's Encrypt cert via
+# DNS-01 in CI, delivers it over SSH, and enables the TLS listeners. This keeps
+# the Cloudflare token off the droplet.
+#
+# The deploy workflow substitutes:
 #   __REPO_REF__       git branch/tag to build the relay from
-#   __REALM__          TURN realm AND TLS cert domain (the server FQDN)
-#   __TURN_PASSWORD__   static long-term TURN credential (from a GitHub secret)
-#   __CERTBOT_EMAIL__   contact email for Let's Encrypt (ACME account)
+#   __REALM__          TURN realm (the server FQDN)
+#   __TURN_PASSWORD__  static long-term TURN credential (from a GitHub secret)
 # external-ip is filled automatically from DO metadata at boot.
-#
-# PRECONDITION for TLS: __REALM__ must already resolve (DNS A record) to this
-# droplet's public IP BEFORE boot — use a DO Reserved IP so the FQDN is stable
-# across redeploys and reassign it to the new droplet as part of deploy.
 
 packages:
   - git
@@ -25,7 +25,6 @@ packages:
   - build-essential
   - python3
   - coturn
-  - certbot
   - ufw
 
 write_files:
@@ -71,8 +70,8 @@ write_files:
     content: |
       TURNSERVER_ENABLED=1
 
-  # ---- coturn: base config (plain STUN/TURN). TLS lines are appended at boot,
-  #      only once the Let's Encrypt cert has been obtained. ----
+  # ---- coturn: base config (plain STUN/TURN). The deploy workflow appends the
+  #      TLS listener lines over SSH once it has delivered the cert. ----
   - path: /etc/turnserver.conf
     permissions: "0640"
     owner: root:turnserver
@@ -84,7 +83,7 @@ write_files:
       # Static long-term credentials (single shared user)
       lt-cred-mech
       realm=__REALM__
-      user=peerkit:__TURN_PASSWORD__
+      user=peerkit-video-chat-user:__TURN_PASSWORD__
 
       # Public IP — filled from DO metadata at boot
       external-ip=__EXTERNAL_IP__
@@ -117,21 +116,6 @@ write_files:
       log-file=/var/log/turnserver/turn.log
       simple-log
 
-  # ---- coturn: certbot deploy hook — copy renewed certs where turnserver can
-  #      read them (the live/ dir is root-only) and restart coturn ----
-  - path: /etc/letsencrypt/renewal-hooks/deploy/coturn.sh
-    permissions: "0755"
-    content: |
-      #!/bin/sh
-      set -e
-      DOMAIN="__REALM__"
-      SRC="/etc/letsencrypt/live/${DOMAIN}"
-      DST="/etc/coturn/certs"
-      install -d -o turnserver -g turnserver -m 0750 "$DST"
-      install -o turnserver -g turnserver -m 0640 "$SRC/fullchain.pem" "$DST/fullchain.pem"
-      install -o turnserver -g turnserver -m 0640 "$SRC/privkey.pem" "$DST/privkey.pem"
-      systemctl restart coturn
-
 runcmd:
   # --- system user owning the relay checkout ---
   - useradd --system --create-home --home-dir /var/lib/peerkit --shell /usr/sbin/nologin peerkit
@@ -149,32 +133,26 @@ runcmd:
   - cd /opt/peerkit-video-chat && sudo -u peerkit HOME=/var/lib/peerkit npm run build
 
   # --- coturn external-ip from DO metadata + log dir ---
-  - EXTIP=$(curl -s http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address); sed -i "s/__EXTERNAL_IP__/${EXTIP}/" /etc/turnserver.conf
+  # Fail the boot if the metadata lookup is empty — a blank external-ip makes
+  # coturn advertise bad relay candidates. The deploy's `cloud-init status
+  # --wait` then surfaces this as a hard failure.
+  - |
+    set -e
+    EXTIP=$(curl -fsS --retry 3 --retry-delay 2 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)
+    if [ -z "$EXTIP" ]; then echo "metadata public IPv4 lookup returned empty" >&2; exit 1; fi
+    sed -i "s|__EXTERNAL_IP__|${EXTIP}|" /etc/turnserver.conf
   - mkdir -p /var/log/turnserver && chown turnserver:turnserver /var/log/turnserver
 
-  # --- firewall: SSH, relay, TURN, TLS, HTTP-01 challenge, UDP relay range ---
+  # --- firewall: SSH, relay, TURN, TLS, UDP relay range ---
   - ufw allow OpenSSH
   - ufw allow 9000/tcp
   - ufw allow 3478
   - ufw allow 5349
   - ufw allow 443/tcp
-  - ufw allow 80/tcp
   - ufw allow 49152:65535/udp
   - ufw --force enable
 
-  # --- Let's Encrypt cert (HTTP-01 standalone on :80). Requires __REALM__ DNS
-  #     to already point here. On success, enable TLS listeners on 5349 + 443.
-  #     On failure (e.g. DNS not yet propagated) plain 3478 still works. ---
-  - |
-    if certbot certonly --standalone --non-interactive --agree-tos \
-        -m "__CERTBOT_EMAIL__" -d "__REALM__"; then
-      printf '\n# TLS listeners (added after cert issuance)\ntls-listening-port=5349\nalt-tls-listening-port=443\ncert=/etc/coturn/certs/fullchain.pem\npkey=/etc/coturn/certs/privkey.pem\n' >> /etc/turnserver.conf
-      /etc/letsencrypt/renewal-hooks/deploy/coturn.sh
-    else
-      echo "certbot failed — coturn will serve plain STUN/TURN on 3478 only" >&2
-    fi
-
-  # --- start services ---
+  # --- start services (coturn plain; the deploy workflow adds TLS) ---
   - systemctl daemon-reload
   - systemctl enable --now coturn
   - systemctl enable --now peerkit-relay

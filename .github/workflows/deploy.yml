@@ -1,9 +1,15 @@
 name: Deploy relay + TURN
 
 # Manually triggered. Provisions a fresh DigitalOcean droplet from
-# infra/cloud-init.yaml (relay + coturn) and points the demo Reserved IP at it.
-# Immutable model: each run creates a NEW droplet. Deleting the old one is left
-# manual so a bad deploy can be rolled back by reassigning the Reserved IP.
+# infra/cloud-init.yaml (relay + coturn, plain), then from CI: upserts the
+# Cloudflare DNS record to the droplet IP, issues a Let's Encrypt cert via
+# DNS-01, and delivers it over SSH to enable coturn TLS.
+#
+# Immutable model: each run creates a NEW droplet. The Cloudflare token and the
+# TLS private key never touch the droplet. Because of that there is no on-box
+# cert renewal — the 90-day cert is refreshed by re-running this workflow.
+# The old droplet is left running so a bad deploy can be rolled back by
+# pointing DNS back at it; delete it manually after verifying.
 on:
   workflow_dispatch:
     inputs:
@@ -11,18 +17,14 @@ on:
         description: Git branch or tag to build the relay from
         required: true
         default: main
-      droplet_name:
-        description: Droplet name
-        required: true
-        default: peerkit-demo
       region:
         description: DO region slug
         required: true
-        default: nyc1
+        default: ams3
       size:
         description: DO droplet size slug
         required: true
-        default: s-1vcpu-1gb
+        default: s-1vcpu-2gb
 
 permissions:
   contents: read
@@ -32,50 +34,52 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # TURN realm = TLS cert domain = the FQDN the Reserved IP resolves to.
-  REALM: peerkit-video-chat-demo.holochain.org
+  # TURN realm = TLS cert domain = the FQDN the DNS record points at. Public
+  # value in a repo variable, shared with release.yml so the client and server
+  # agree on one source of truth.
+  REALM: ${{ vars.TURN_REALM }}
+  # Single droplet per repo — name is fixed, not an input.
+  DROPLET_NAME: peerkit-video-chat-demo
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Secrets and the TURN_REALM variable live in this Actions environment.
+    environment: demo
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        # Pinned to a commit SHA (supply-chain); no token needed after checkout.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Install doctl
-        uses: digitalocean/action-doctl@v2
+        uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
       # Substitute placeholders in cloud-init. Untrusted/secret values reach the
-      # script only through env vars and are applied with a literal str.replace,
-      # so special characters can't break templating or inject shell.
+      # script only through env vars and are applied with bash parameter
+      # expansion (`${s//pat/rep}`), which substitutes literally — special
+      # characters in the password can't break templating or inject shell.
       - name: Render cloud-init
         env:
           REPO_REF: ${{ inputs.repo_ref }}
           TURN_PASSWORD: ${{ secrets.TURN_PASSWORD }}
-          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
         run: |
-          python3 - <<'PY'
-          import os
-          repl = {
-              "__REPO_REF__": os.environ["REPO_REF"],
-              "__REALM__": os.environ["REALM"],
-              "__TURN_PASSWORD__": os.environ["TURN_PASSWORD"],
-              "__CERTBOT_EMAIL__": os.environ["CERTBOT_EMAIL"],
-          }
-          with open("infra/cloud-init.yaml") as f:
-              s = f.read()
-          for k, v in repl.items():
-              s = s.replace(k, v)
-          with open("user-data.yaml", "w") as f:
-              f.write(s)
-          PY
+          # bash 5.2+ treats `&` in a //-replacement as the matched text; turn
+          # that off so the password substitutes literally.
+          shopt -u patsub_replacement
+          s=$(cat infra/cloud-init.yaml)
+          s=${s//__REPO_REF__/$REPO_REF}
+          s=${s//__REALM__/$REALM}
+          s=${s//__TURN_PASSWORD__/$TURN_PASSWORD}
+          printf '%s\n' "$s" > user-data.yaml
 
       - name: Create droplet
         id: create
         env:
-          NAME: ${{ inputs.droplet_name }}
+          NAME: ${{ env.DROPLET_NAME }}
           REGION: ${{ inputs.region }}
           SIZE: ${{ inputs.size }}
           # Comma-separated list of SSH key fingerprints (or IDs/names), one per
@@ -92,12 +96,78 @@ jobs:
           ip=$(doctl compute droplet get "$id" --no-header --format PublicIPv4)
           echo "droplet_ip=$ip" >> "$GITHUB_OUTPUT"
 
-      - name: Reassign Reserved IP to the new droplet
+      # Issue the cert in CI via DNS-01 so the Cloudflare token stays off the
+      # droplet. Custom dirs keep everything in the workspace (no root needed).
+      # DNS-01 uses a TXT record, so it does not depend on the public A record —
+      # the A cutover is deferred to the end, after TLS is confirmed working.
+      - name: Issue TLS certificate (DNS-01)
         env:
-          RESERVED_IP: ${{ secrets.DO_RESERVED_IP }}
-          DROPLET_ID: ${{ steps.create.outputs.droplet_id }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+          NAME: ${{ env.REALM }}
         run: |
-          doctl compute reserved-ip-action assign "$RESERVED_IP" "$DROPLET_ID" --wait
+          sudo apt-get update
+          sudo apt-get install -y certbot python3-certbot-dns-cloudflare
+          umask 077
+          printf 'dns_cloudflare_api_token = %s\n' "$CF_TOKEN" > cf.ini
+          certbot certonly --dns-cloudflare \
+            --dns-cloudflare-credentials "$PWD/cf.ini" \
+            --dns-cloudflare-propagation-seconds 30 \
+            -d "$NAME" --non-interactive --agree-tos -m "$EMAIL" \
+            --config-dir "$PWD/le" --work-dir "$PWD/le-work" --logs-dir "$PWD/le-logs"
+          rm -f cf.ini
+
+      # Wait for cloud-init to finish (coturn installed), copy the cert to a
+      # turnserver-readable path, append the TLS listeners, restart coturn.
+      - name: Deliver cert and enable TLS
+        env:
+          SSH_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+          IP: ${{ steps.create.outputs.droplet_ip }}
+          NAME: ${{ env.REALM }}
+        run: |
+          printf '%s' "$SSH_KEY" > key && chmod 600 key
+          ssh_opts="-i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          remote() { ssh $ssh_opts "root@${IP}" "$@"; }
+          # Block until first-boot provisioning has finished installing coturn.
+          # Hard-fail (and dump diagnostics) if it errors or times out, rather
+          # than masking it and racing a half-provisioned box.
+          if ! timeout 900 ssh $ssh_opts "root@${IP}" 'cloud-init status --wait'; then
+            remote 'cloud-init status --long; tail -n 100 /var/log/cloud-init-output.log' || true
+            echo "::error::cloud-init did not finish cleanly on the droplet"
+            exit 1
+          fi
+          remote 'install -d -o turnserver -g turnserver -m 0750 /etc/coturn/certs'
+          scp $ssh_opts "le/live/${NAME}/fullchain.pem" "root@${IP}:/tmp/fullchain.pem"
+          scp $ssh_opts "le/live/${NAME}/privkey.pem" "root@${IP}:/tmp/privkey.pem"
+          remote 'install -o turnserver -g turnserver -m 0640 /tmp/fullchain.pem /etc/coturn/certs/fullchain.pem
+                  install -o turnserver -g turnserver -m 0640 /tmp/privkey.pem /etc/coturn/certs/privkey.pem
+                  rm -f /tmp/fullchain.pem /tmp/privkey.pem
+                  grep -q "^tls-listening-port" /etc/turnserver.conf || printf "\ntls-listening-port=5349\nalt-tls-listening-port=443\ncert=/etc/coturn/certs/fullchain.pem\npkey=/etc/coturn/certs/privkey.pem\n" >> /etc/turnserver.conf
+                  systemctl restart coturn'
+          rm -f key
+
+      # Cut DNS over only now that the new droplet serves TURN + working TLS.
+      # DNS-only (grey cloud) A record — Cloudflare's proxy can't carry TURN UDP.
+      - name: Upsert Cloudflare DNS record
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          NAME: ${{ env.REALM }}
+          IP: ${{ steps.create.outputs.droplet_ip }}
+        run: |
+          api="https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records"
+          rec_id=$(curl -fsS -H "Authorization: Bearer ${CF_TOKEN}" \
+            "${api}?type=A&name=${NAME}" | jq -r '.result[0].id // empty')
+          body=$(jq -nc --arg name "$NAME" --arg ip "$IP" \
+            '{type:"A",name:$name,content:$ip,ttl:120,proxied:false}')
+          if [ -n "$rec_id" ]; then
+            curl -fsS -X PUT -H "Authorization: Bearer ${CF_TOKEN}" \
+              -H "Content-Type: application/json" -d "$body" "${api}/${rec_id}" >/dev/null
+          else
+            curl -fsS -X POST -H "Authorization: Bearer ${CF_TOKEN}" \
+              -H "Content-Type: application/json" -d "$body" "${api}" >/dev/null
+          fi
+          echo "A ${NAME} -> ${IP}"
 
       - name: Summary
         env:
@@ -105,8 +175,9 @@ jobs:
           ID: ${{ steps.create.outputs.droplet_id }}
         run: |
           {
-            echo "Deployed droplet **$ID** (boot IP $IP)."
-            echo "Reserved IP reassigned — $REALM now resolves here once propagated."
+            echo "Deployed droplet **$ID** ($IP)."
+            echo "DNS $REALM updated; coturn TLS enabled on 5349/443."
             echo ""
             echo "Old droplet (if any) was left running; delete it manually after verifying."
+            echo "Cert is 90 days with no on-box renewal — re-run this workflow to refresh."
           } >> "$GITHUB_STEP_SUMMARY"
