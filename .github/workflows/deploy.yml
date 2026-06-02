@@ -1,0 +1,112 @@
+name: Deploy relay + TURN
+
+# Manually triggered. Provisions a fresh DigitalOcean droplet from
+# infra/cloud-init.yaml (relay + coturn) and points the demo Reserved IP at it.
+# Immutable model: each run creates a NEW droplet. Deleting the old one is left
+# manual so a bad deploy can be rolled back by reassigning the Reserved IP.
+on:
+  workflow_dispatch:
+    inputs:
+      repo_ref:
+        description: Git branch or tag to build the relay from
+        required: true
+        default: main
+      droplet_name:
+        description: Droplet name
+        required: true
+        default: peerkit-demo
+      region:
+        description: DO region slug
+        required: true
+        default: nyc1
+      size:
+        description: DO droplet size slug
+        required: true
+        default: s-1vcpu-1gb
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-relay-turn
+  cancel-in-progress: false
+
+env:
+  # TURN realm = TLS cert domain = the FQDN the Reserved IP resolves to.
+  REALM: peerkit-video-chat-demo.holochain.org
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      # Substitute placeholders in cloud-init. Untrusted/secret values reach the
+      # script only through env vars and are applied with a literal str.replace,
+      # so special characters can't break templating or inject shell.
+      - name: Render cloud-init
+        env:
+          REPO_REF: ${{ inputs.repo_ref }}
+          TURN_PASSWORD: ${{ secrets.TURN_PASSWORD }}
+          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+        run: |
+          python3 - <<'PY'
+          import os
+          repl = {
+              "__REPO_REF__": os.environ["REPO_REF"],
+              "__REALM__": os.environ["REALM"],
+              "__TURN_PASSWORD__": os.environ["TURN_PASSWORD"],
+              "__CERTBOT_EMAIL__": os.environ["CERTBOT_EMAIL"],
+          }
+          with open("infra/cloud-init.yaml") as f:
+              s = f.read()
+          for k, v in repl.items():
+              s = s.replace(k, v)
+          with open("user-data.yaml", "w") as f:
+              f.write(s)
+          PY
+
+      - name: Create droplet
+        id: create
+        env:
+          NAME: ${{ inputs.droplet_name }}
+          REGION: ${{ inputs.region }}
+          SIZE: ${{ inputs.size }}
+          # Comma-separated list of SSH key fingerprints (or IDs/names), one per
+          # authorized operator. doctl --ssh-keys accepts the comma list as-is.
+          SSH_KEYS: ${{ secrets.DO_SSH_KEY_FINGERPRINTS }}
+        run: |
+          id=$(doctl compute droplet create "$NAME" \
+            --image ubuntu-24-04-x64 \
+            --region "$REGION" --size "$SIZE" \
+            --ssh-keys "$SSH_KEYS" \
+            --user-data-file user-data.yaml \
+            --wait --no-header --format ID)
+          echo "droplet_id=$id" >> "$GITHUB_OUTPUT"
+          ip=$(doctl compute droplet get "$id" --no-header --format PublicIPv4)
+          echo "droplet_ip=$ip" >> "$GITHUB_OUTPUT"
+
+      - name: Reassign Reserved IP to the new droplet
+        env:
+          RESERVED_IP: ${{ secrets.DO_RESERVED_IP }}
+          DROPLET_ID: ${{ steps.create.outputs.droplet_id }}
+        run: |
+          doctl compute reserved-ip-action assign "$RESERVED_IP" "$DROPLET_ID" --wait
+
+      - name: Summary
+        env:
+          IP: ${{ steps.create.outputs.droplet_ip }}
+          ID: ${{ steps.create.outputs.droplet_id }}
+        run: |
+          {
+            echo "Deployed droplet **$ID** (boot IP $IP)."
+            echo "Reserved IP reassigned — $REALM now resolves here once propagated."
+            echo ""
+            echo "Old droplet (if any) was left running; delete it manually after verifying."
+          } >> "$GITHUB_STEP_SUMMARY"
