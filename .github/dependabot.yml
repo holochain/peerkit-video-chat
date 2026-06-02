@@ -12,6 +12,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # @types/node tracks the Node release line we actually run, not the
+      # newest published. CI and `engines` pin Node 22, so a major jump to
+      # @types/node 25 describes APIs that don't exist at runtime — the type
+      # check passes while the call fails. Hold majors until we move runtime.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
     groups:
       # One PR per week for non-major bumps to cut review noise; majors stay
       # separate so breaking changes get individual scrutiny.
