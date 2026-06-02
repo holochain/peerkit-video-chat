@@ -301,8 +301,8 @@ a:hover {
   background: var(--accent);
   color: #1a1033;
 }
-/* The recommended format for the platform (.dmg, NSIS .exe, .AppImage) leads
-   the list as a solid accent button, in any card. */
+/* On the visitor's own platform, the recommended format (.dmg, NSIS .exe,
+   .AppImage) leads the list as a solid accent button. */
 .dl-asset--primary,
 .card.recommended .dl-asset--primary {
   background: var(--accent);
