@@ -109,6 +109,7 @@ journalctl -u peerkit-relay -f
 tail -f /var/log/turnserver/turn.log
 ```
 
-The relay prints its full multiaddr (`/ip4/<ip>/tcp/9000/ws/p2p/<nodeId>`) at
-startup — read it from `journalctl -u peerkit-relay` to configure clients
-(`PEERKIT_RELAY_ADDR`).
+The relay logs structured JSON at startup; the `relay ready` line carries its
+full multiaddr in the `multiaddrs` field
+(`/ip4/<ip>/tcp/9000/ws/p2p/<nodeId>`) — read it from
+`journalctl -u peerkit-relay` to configure clients (`PEERKIT_RELAY_ADDR`).
