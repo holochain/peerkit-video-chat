@@ -148,16 +148,26 @@ jobs:
             echo "::error::DO_SSH_PRIVATE_KEY is not a valid OpenSSH private key"
             exit 1
           fi
-          ssh_opts="-i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          ssh_opts="-i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes"
           remote() { ssh $ssh_opts "root@${IP}" "$@"; }
-          # Block until first-boot provisioning has finished installing coturn.
-          # Hard-fail (and dump diagnostics) if it errors or times out, rather
-          # than masking it and racing a half-provisioned box.
-          if ! timeout 900 ssh $ssh_opts "root@${IP}" 'cloud-init status --wait'; then
+          # `doctl --wait` returns at "active", before sshd accepts connections,
+          # so the first attempts can be reset. Retry until the box answers, then
+          # block on cloud-init finishing. An ssh transport failure is exit 255
+          # (retry); any other non-zero is a real cloud-init error (hard-fail).
+          deadline=$((SECONDS + 900))
+          while :; do
+            remote 'cloud-init status --wait' && break
+            rc=$?
+            if [ "$rc" = 255 ]; then
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::droplet SSH never became reachable"; exit 1
+              fi
+              echo "sshd not ready yet, retrying in 10s..."; sleep 10; continue
+            fi
             remote 'cloud-init status --long; tail -n 100 /var/log/cloud-init-output.log' || true
             echo "::error::cloud-init did not finish cleanly on the droplet"
             exit 1
-          fi
+          done
           remote 'install -d -o turnserver -g turnserver -m 0750 /etc/coturn/certs'
           scp $ssh_opts "le/live/${NAME}/fullchain.pem" "root@${IP}:/tmp/fullchain.pem"
           scp $ssh_opts "le/live/${NAME}/privkey.pem" "root@${IP}:/tmp/privkey.pem"
