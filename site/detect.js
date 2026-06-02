@@ -145,13 +145,17 @@
 
       var version = release.tag_name || release.name || "";
 
+      // Shared "all files" link below the cards (the per-format direct links
+      // live in the cards; this points at the full release).
+      var allLink = document.getElementById("dl-all-link");
+      if (allLink && version) allLink.textContent = "All " + version + " files →";
+
       Object.keys(byOS).forEach(function (assetOS) {
         var list = byOS[assetOS];
         if (!list.length) return;
         var dlCard = document.querySelector('.dl-card[data-os="' + assetOS + '"]');
         if (!dlCard) return;
         var box = dlCard.querySelector(".dl-assets");
-        var fallback = dlCard.querySelector(".dl-fallback");
         if (!box) return;
 
         // Lead with the recommended format for the platform.
@@ -175,9 +179,6 @@
         });
 
         box.hidden = false;
-        if (fallback) {
-          fallback.textContent = version ? "All " + version + " files →" : "All release files →";
-        }
 
         if (!isRecommendedOS) return;
 
