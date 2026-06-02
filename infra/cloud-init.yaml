@@ -73,9 +73,11 @@ write_files:
 
   # ---- coturn: base config (plain STUN/TURN). The deploy workflow appends the
   #      TLS listener lines over SSH once it has delivered the cert. ----
+  # Written as root:root here - the `turnserver` group doesn't exist until the
+  # coturn package is installed (later than this write_files stage). runcmd
+  # chowns it to root:turnserver once coturn is present.
   - path: /etc/turnserver.conf
     permissions: "0640"
-    owner: root:turnserver
     content: |
       # STUN/TURN listeners
       listening-port=3478
@@ -142,6 +144,9 @@ runcmd:
     EXTIP=$(curl -fsS --retry 3 --retry-delay 2 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)
     if [ -z "$EXTIP" ]; then echo "metadata public IPv4 lookup returned empty" >&2; exit 1; fi
     sed -i "s|__EXTERNAL_IP__|${EXTIP}|" /etc/turnserver.conf
+    # Now that coturn is installed, the turnserver group exists - fix ownership.
+    chown root:turnserver /etc/turnserver.conf
+    chmod 0640 /etc/turnserver.conf
   - mkdir -p /var/log/turnserver && chown turnserver:turnserver /var/log/turnserver
 
   # --- firewall: SSH, relay, TURN, TLS, UDP relay range ---
