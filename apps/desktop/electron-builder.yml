@@ -63,8 +63,14 @@ deb:
 mac:
   target:
     - pkg
+    - dmg
   category: public.app-category.social-networking
   identity: null
 win:
   target:
     - msi
+    - nsis
+nsis:
+  # A silent CI smoke install shouldn't auto-launch the app — the smoke-test
+  # step launches it explicitly and asserts it stays up.
+  runAfterFinish: false
