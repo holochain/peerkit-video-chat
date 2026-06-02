@@ -2,6 +2,8 @@
 
 A video chat application built to showcase [PeerKit](https://github.com/holochain/peerkit), a peer-to-peer data synchronization framework written in TypeScript.
 
+**Website & downloads:** https://holochain.github.io/peerkit-video-chat/
+
 ## What it is
 
 `peerkit-video-chat` is a small, focused showcase: organizations or teams deploy an instance, each member is issued their own access credentials for the deployment, and members can create or join call rooms inside that organization. Each room supports:

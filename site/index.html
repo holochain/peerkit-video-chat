@@ -3,21 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PeerKit Video Chat — peer-to-peer video calls</title>
+
+    <title>PeerKit Video Chat — private peer-to-peer video calls</title>
     <meta
       name="description"
-      content="A peer-to-peer video chat app built to showcase PeerKit, a TypeScript P2P data synchronization framework. Live audio, video, and ephemeral text chat — no central server for your media."
+      content="A free, open-source desktop app for private peer-to-peer video calls. Audio, video, and text chat that flow directly between participants. For Linux, macOS, and Windows."
     />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0c0a18" />
+    <link rel="canonical" href="https://holochain.github.io/peerkit-video-chat/" />
     <link rel="icon" type="image/png" href="favicon.png" />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="PeerKit Video Chat" />
+    <meta property="og:title" content="PeerKit Video Chat — private peer-to-peer video calls" />
     <meta
       property="og:description"
-      content="Peer-to-peer video calls, built to showcase PeerKit."
+      content="A free, open-source desktop app for private peer-to-peer video calls. Audio, video, and text chat that flow directly between participants."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="icon.png" />
+    <meta property="og:url" content="https://holochain.github.io/peerkit-video-chat/" />
+    <meta property="og:site_name" content="PeerKit Video Chat" />
+    <meta property="og:image" content="https://holochain.github.io/peerkit-video-chat/icon.png" />
+    <meta property="og:image:alt" content="PeerKit Video Chat app icon" />
+    <meta property="og:locale" content="en_US" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -26,6 +34,22 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "PeerKit Video Chat",
+        "applicationCategory": "CommunicationApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "description": "A free, open-source desktop app for private peer-to-peer video calls. Audio, video, and text chat that flow directly between participants.",
+        "url": "https://holochain.github.io/peerkit-video-chat/",
+        "downloadUrl": "https://github.com/holochain/peerkit-video-chat/releases/latest",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": { "@type": "Organization", "name": "Holochain", "url": "https://github.com/holochain" }
+      }
+    </script>
   </head>
   <body>
     <header class="topbar">
@@ -50,15 +74,14 @@
     <main id="top">
       <section class="hero">
         <img class="hero-icon" src="icon.png" alt="" width="112" height="112" />
-        <h1 class="font-display">Peer-to-peer video calls</h1>
+        <h1 class="font-display">Private peer-to-peer video calls</h1>
         <p class="hero-sub">
           A small, focused showcase for
           <a href="https://github.com/holochain/peerkit" rel="noopener"
             >PeerKit</a
-          >
-          — a TypeScript peer-to-peer data synchronization framework. Live audio,
-          video, and ephemeral text chat, with no central server carrying your
-          media.
+          >, a TypeScript peer-to-peer framework. Live audio, video, and text
+          chat that flow directly between the people on the call whenever the
+          network allows.
         </p>
         <div class="cta-row">
           <a class="btn btn-primary" id="download-cta" href="#download">Download</a>
@@ -69,52 +92,62 @@
             >View source</a
           >
         </div>
-        <p class="hero-note font-mono">Linux · macOS · Windows</p>
+        <p class="hero-note font-mono">Free &amp; open source · Linux · macOS · Windows</p>
       </section>
 
       <section id="features" class="section">
         <h2 class="font-display">What it does</h2>
+        <p class="section-sub">
+          You meet in a <strong>room</strong>: a named space you create or join
+          just by typing its name. Everyone in the same room is on the same call
+          and shares its text chat. Rooms are temporary — when the last person
+          leaves, the room and everything said in it are gone.
+        </p>
         <div class="grid">
           <article class="card">
             <h3>Live audio &amp; video</h3>
             <p>
-              Real-time calls between participants over WebRTC, established
-              directly peer-to-peer where the network allows.
+              Real-time group calls. Your audio and video go straight to the
+              other people in the room whenever the network allows.
             </p>
           </article>
           <article class="card">
-            <h3>Ephemeral text chat</h3>
+            <h3>In-the-moment text chat</h3>
             <p>
-              Messages are broadcast only while you are in the room. No history,
-              no replay, no catch-up for late joiners.
+              Chat alongside the call. Messages reach only the people in the room
+              at the time — nothing is saved, replayed, or shown to anyone who
+              joins later.
             </p>
           </article>
           <article class="card">
-            <h3>Rooms per deployment</h3>
+            <h3>Private to your group</h3>
             <p>
-              An organization deploys an instance, issues credentials to its
-              members, and they create or join call rooms inside it.
+              An organization runs its own instance, and its members join the
+              rooms inside it. Each instance is a closed network — outsiders
+              can't take part.
             </p>
           </article>
           <article class="card">
             <h3>Direct, with a fallback</h3>
             <p>
-              Calls run STUN-only by default and fall back to a TURN relay only
-              when two peers cannot reach each other directly.
+              Calls connect directly when they can, and automatically take a
+              relayed path when a direct one isn't possible — so they keep
+              working on restrictive networks.
             </p>
           </article>
           <article class="card">
-            <h3>Self-hostable relay</h3>
+            <h3>Run it yourself</h3>
             <p>
-              Peer discovery runs through a PeerKit relay you can run yourself —
-              a thin rendezvous point, not a media server.
+              The app finds peers through a lightweight server you can host on
+              your own infrastructure. It helps people connect; your audio and
+              video don't pass through it.
             </p>
           </article>
           <article class="card">
             <h3>Resilient connections</h3>
             <p>
-              A recovery ladder re-establishes dropped calls: ICE restart, then
-              a full rebuild, then a relay-only retry before giving up.
+              If a call drops, the app automatically tries to restore it —
+              several times, in increasingly thorough ways — before giving up.
             </p>
           </article>
         </div>
@@ -122,14 +155,19 @@
 
       <section id="how" class="section">
         <h2 class="font-display">How it works</h2>
+        <p class="section-sub">
+          A few technical terms below; the short version is that calls go
+          peer-to-peer, and the server is only there to help peers find and
+          reach each other.
+        </p>
         <ol class="steps">
           <li>
             <span class="step-n font-mono">1</span>
             <div>
               <h3>Discover</h3>
               <p>
-                Each app connects to a PeerKit relay and learns which other
-                members are online and which rooms are active.
+                Each app connects to a PeerKit relay — a rendezvous point — and
+                learns which other members are online and which rooms are active.
               </p>
             </div>
           </li>
@@ -138,8 +176,10 @@
             <div>
               <h3>Connect</h3>
               <p>
-                Peers negotiate a direct WebRTC connection. The relay carries
-                only the signaling; your audio and video do not pass through it.
+                Peers link up over PeerKit's libp2p network — directly to each
+                other where the network permits, falling back to the relay
+                otherwise. The WebRTC setup messages (SDP and ICE) travel over
+                that link, so they go direct whenever the peers do.
               </p>
             </div>
           </li>
@@ -148,8 +188,9 @@
             <div>
               <h3>Call</h3>
               <p>
-                Media flows peer-to-peer. If a direct path is impossible, a TURN
-                relay carries the encrypted media as a fallback.
+                Media flows over WebRTC. ICE uses STUN to find a direct path
+                between peers; when none exists, an optional (but recommended)
+                TURN relay forwards the encrypted media as a fallback.
               </p>
             </div>
           </li>
@@ -159,39 +200,46 @@
       <section id="download" class="section">
         <h2 class="font-display">Download</h2>
         <p class="section-sub">
-          Pre-built installers for every release are published on GitHub. Builds
-          are currently unsigned.
+          Free, open-source installers for the latest release. Builds are
+          currently unsigned, so your OS may warn before the first launch.
         </p>
         <!-- Filled by detect.js when a desktop platform is recognised. -->
         <p id="recommendation" class="recommendation" hidden></p>
         <div class="grid grid-3" id="download-grid">
-          <a
-            class="card card-link"
-            data-os="linux"
-            href="https://github.com/holochain/peerkit-video-chat/releases/latest"
-            rel="noopener"
-          >
+          <article class="card dl-card" data-os="linux">
             <h3>Linux</h3>
-            <p class="font-mono">.AppImage · .deb</p>
-          </a>
-          <a
-            class="card card-link"
-            data-os="mac"
-            href="https://github.com/holochain/peerkit-video-chat/releases/latest"
-            rel="noopener"
-          >
+            <p class="dl-formats font-mono">.AppImage · .deb</p>
+            <!-- Direct download links injected by detect.js from the latest release. -->
+            <div class="dl-assets" hidden></div>
+            <a
+              class="dl-fallback"
+              href="https://github.com/holochain/peerkit-video-chat/releases/latest"
+              rel="noopener"
+              >Latest release →</a
+            >
+          </article>
+          <article class="card dl-card" data-os="mac">
             <h3>macOS</h3>
-            <p class="font-mono">.pkg</p>
-          </a>
-          <a
-            class="card card-link"
-            data-os="windows"
-            href="https://github.com/holochain/peerkit-video-chat/releases/latest"
-            rel="noopener"
-          >
+            <p class="dl-formats font-mono">.pkg</p>
+            <div class="dl-assets" hidden></div>
+            <a
+              class="dl-fallback"
+              href="https://github.com/holochain/peerkit-video-chat/releases/latest"
+              rel="noopener"
+              >Latest release →</a
+            >
+          </article>
+          <article class="card dl-card" data-os="windows">
             <h3>Windows</h3>
-            <p class="font-mono">.msi</p>
-          </a>
+            <p class="dl-formats font-mono">.msi</p>
+            <div class="dl-assets" hidden></div>
+            <a
+              class="dl-fallback"
+              href="https://github.com/holochain/peerkit-video-chat/releases/latest"
+              rel="noopener"
+              >Latest release →</a
+            >
+          </article>
         </div>
         <p class="section-sub">
           Or build from source — see the
