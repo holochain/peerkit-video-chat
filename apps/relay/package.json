@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@peerkit/api": "^0.1.0-alpha.10",
-    "@peerkit/peerkit": "^0.1.0-alpha.10",
+    "@peerkit/peerkit": "^0.1.0-alpha.12",
     "@peerkit/transport-libp2p-nodejs": "^0.1.0-alpha.10"
   },
   "devDependencies": {
