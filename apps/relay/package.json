@@ -16,6 +16,6 @@
     "@peerkit/transport-libp2p-nodejs": "^0.1.0-alpha.10"
   },
   "devDependencies": {
-    "tsx": "^4.19.0"
+    "tsx": "^4.22.4"
   }
 }
