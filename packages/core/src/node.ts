@@ -33,6 +33,12 @@ export interface ChatNodeOptions {
   onNetworkRooms?: (rooms: NetworkRoomEntry[]) => void;
   /** Called whenever peer connectivity changes (discovered/connected counts). */
   onPeerStats?: (stats: PeerStats) => void;
+  /**
+   * Called when the node establishes (or re-establishes) a connection to a
+   * bootstrap relay. PeerKit emits no matching disconnect event, so this only
+   * ever transitions the relay status to connected, never back. (Upstream gap.)
+   */
+  onRelayConnected?: (address: string) => void;
 }
 
 export interface ChatNode {
@@ -233,6 +239,9 @@ export async function startChatNode(
       if (changed) emitNetworkRooms();
       emitPeerStats();
       roomRef.current?.onPeerDisconnected(agentId);
+    })
+    .withRelayConnectedObserver((address) => {
+      options.onRelayConnected?.(String(address));
     });
 
   if (options.id !== undefined) {
