@@ -61,11 +61,25 @@ deb:
   # 24.04+ then blocks userns at runtime and Electron aborts. See the script.
   afterInstall: build/deb-after-install.sh
 mac:
+  # .dmg only. Signing a .pkg would need a separate "Developer ID Installer"
+  # certificate; the Developer ID Application cert we have signs the .app/.dmg.
   target:
-    - pkg
     - dmg
   category: public.app-category.social-networking
-  identity: null
+  # Notarization requires the hardened runtime. The entitlements below re-open
+  # what the hardened runtime otherwise blocks: V8's JIT, the unsigned native
+  # .node addons, and — because this is a video chat app — the camera and mic.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # electron-builder 26 wants a boolean here; the credentials come from the
+  # environment (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID).
+  notarize: true
+  # User-facing strings for the camera/mic permission prompts (Info.plist).
+  extendInfo:
+    NSCameraUsageDescription: PeerKit Video Chat uses your camera for video calls.
+    NSMicrophoneUsageDescription: PeerKit Video Chat uses your microphone for calls.
 win:
   target:
     - msi
