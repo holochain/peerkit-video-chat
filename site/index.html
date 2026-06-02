@@ -61,7 +61,7 @@
           media.
         </p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="#download">Download</a>
+          <a class="btn btn-primary" id="download-cta" href="#download">Download</a>
           <a
             class="btn btn-ghost"
             href="https://github.com/holochain/peerkit-video-chat"
@@ -162,9 +162,12 @@
           Pre-built installers for every release are published on GitHub. Builds
           are currently unsigned.
         </p>
-        <div class="grid grid-3">
+        <!-- Filled by detect.js when a desktop platform is recognised. -->
+        <p id="recommendation" class="recommendation" hidden></p>
+        <div class="grid grid-3" id="download-grid">
           <a
             class="card card-link"
+            data-os="linux"
             href="https://github.com/holochain/peerkit-video-chat/releases/latest"
             rel="noopener"
           >
@@ -173,6 +176,7 @@
           </a>
           <a
             class="card card-link"
+            data-os="mac"
             href="https://github.com/holochain/peerkit-video-chat/releases/latest"
             rel="noopener"
           >
@@ -181,6 +185,7 @@
           </a>
           <a
             class="card card-link"
+            data-os="windows"
             href="https://github.com/holochain/peerkit-video-chat/releases/latest"
             rel="noopener"
           >
@@ -225,5 +230,7 @@
         <p class="footer-note">A showcase for the PeerKit framework.</p>
       </div>
     </footer>
+
+    <script src="detect.js" defer></script>
   </body>
 </html>
