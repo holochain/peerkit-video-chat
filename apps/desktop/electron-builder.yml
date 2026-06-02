@@ -46,12 +46,15 @@ linux:
   # for the taskbar/dash (a lone 1024px icon isn't picked up).
   icon: build/icons
   desktop:
-    # Match the runtime app_id (the bundled package.json "name", pinned via
-    # extraMetadata above) so the window associates with this entry and shows its
-    # icon. Used as the X11 WM_CLASS hint under XWayland; under native Wayland
-    # GNOME matches the app_id to this file's basename. electron-builder
-    # otherwise defaults StartupWMClass to productName, which doesn't match.
-    StartupWMClass: peerkit-video-chat
+    # electron-builder 26 restructured linux.desktop: raw .desktop entry keys
+    # now live under `entry` ({ desktopActions?, entry? }), not at the top level.
+    entry:
+      # Match the runtime app_id (the bundled package.json "name", pinned via
+      # extraMetadata above) so the window associates with this entry and shows
+      # its icon. Used as the X11 WM_CLASS hint under XWayland; under native
+      # Wayland GNOME matches the app_id to this file's basename. electron-builder
+      # otherwise defaults StartupWMClass to productName, which doesn't match.
+      StartupWMClass: peerkit-video-chat
 deb:
   # Override the default postinst, which disables the SUID sandbox on hosts
   # where unprivileged user namespaces look usable at install time. Ubuntu
