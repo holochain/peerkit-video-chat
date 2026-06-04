@@ -33,16 +33,56 @@
 
   let settingsOpen = $state(false);
   let idOpen = $state(false);
+  let peersOpen = $state(false);
 
   function toggleSettings() {
     settingsOpen = !settingsOpen;
-    if (settingsOpen) idOpen = false;
+    if (settingsOpen) { idOpen = false; peersOpen = false; }
   }
 
   function toggleId() {
     idOpen = !idOpen;
-    if (idOpen) settingsOpen = false;
+    if (idOpen) { settingsOpen = false; peersOpen = false; }
   }
+
+  let peersEl = $state<HTMLDivElement | null>(null);
+
+  function togglePeers() {
+    peersOpen = !peersOpen;
+    if (peersOpen) { settingsOpen = false; idOpen = false; }
+  }
+
+  $effect(() => {
+    if (!peersOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (peersEl && !peersEl.contains(e.target as Node)) peersOpen = false;
+    };
+    const timer = setTimeout(() => document.addEventListener('mousedown', onDown), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', onDown);
+    };
+  });
+
+  // Connected peers first, then by name (falling back to agentId).
+  const sortedPeers = $derived(
+    [...(peerStats?.peers ?? [])].sort(
+      (a, b) =>
+        Number(b.connected) - Number(a.connected) ||
+        (a.displayName ?? a.agentId).localeCompare(b.displayName ?? b.agentId),
+    ),
+  );
+
+  function peerStatus(p: { connected: boolean; direct: boolean }): string {
+    if (!p.connected) return 'discovered';
+    return p.direct ? 'direct' : 'relayed';
+  }
+
+  // Count every peer we currently know exists — connected or merely discovered
+  // via the agent store. A connected peer is online by definition, so this never
+  // shows fewer "online" than "connected" (the agent store can lack a record for
+  // a peer we are still connected to, e.g. after its TTL expired).
+  const onlineCount = $derived(peerStats?.peers.length ?? 0);
 </script>
 
 <div class="topbar">
@@ -56,20 +96,46 @@
   <div class="topbar-spacer"></div>
 
   {#if peerStats}
-    <div class="peers" tabindex="0" role="status" aria-label="{peerStats.discovered} peers online">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-      <span class="peers-count">{peerStats.discovered}</span>
-      <span class="peers-label">online</span>
-      <div class="peers-tip" role="tooltip">
-        <div class="peers-tip-row"><strong>{peerStats.discovered}</strong> discovered</div>
-        <div class="peers-tip-row"><strong>{peerStats.connected}</strong> connected</div>
-        <div class="peers-tip-sub">{peerStats.direct} direct · {peerStats.relayed} relayed</div>
-      </div>
+    <div style="position:relative" bind:this={peersEl}>
+      <button
+        class="peers"
+        onclick={togglePeers}
+        aria-label="{onlineCount} peers online — show details"
+        aria-expanded={peersOpen}
+        type="button"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+        <span class="peers-count">{onlineCount}</span>
+        <span class="peers-label">online</span>
+      </button>
+      {#if peersOpen}
+        <div class="peers-panel" role="dialog" aria-label="Peers">
+          <div class="peers-panel-head">
+            <span><strong>{peerStats.connected}</strong> connected</span>
+            <span class="peers-panel-sub">{peerStats.direct} direct · {peerStats.relayed} relayed</span>
+            <span class="peers-panel-sub">{peerStats.discovered} in agent store</span>
+          </div>
+          <ul class="peers-list">
+            {#each sortedPeers as p (p.agentId)}
+              <li class="peer-row">
+                <span class="peer-dot peer-dot--{peerStatus(p)}"></span>
+                <span class="peer-id-block">
+                  <span class="peer-name">{p.displayName ?? 'unknown'}</span>
+                  <span class="peer-id" title={p.agentId}>{p.agentId.slice(0, 16)}</span>
+                </span>
+                <span class="peer-badge peer-badge--{peerStatus(p)}">{peerStatus(p)}</span>
+              </li>
+            {:else}
+              <li class="peers-empty">No peers yet</li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
     </div>
   {/if}
 
