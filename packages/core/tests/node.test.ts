@@ -48,7 +48,7 @@ vi.mock("@peerkit/peerkit", () => {
 });
 
 import { startChatNode, type ChatNodeOptions } from "../src/node.js";
-import { encode, MsgType } from "../src/envelope.js";
+import { decode, encode, MsgType } from "../src/envelope.js";
 
 interface FakeNode {
   keyPair: { agentId: () => string };
@@ -75,7 +75,12 @@ function makeNode(overrides: Partial<FakeNode> = {}): FakeNode {
   };
 }
 
-const noopEvents = () => ({ onState: () => {}, onChat: () => {}, onSignal: () => {} });
+const noopEvents = () => ({
+  onState: () => {},
+  onChat: () => {},
+  onSignal: () => {},
+  onMediaState: () => {},
+});
 
 function baseOptions(over: Partial<ChatNodeOptions> = {}): ChatNodeOptions {
   return {
@@ -120,7 +125,152 @@ describe("computePeerStats", () => {
       },
     });
     const chat = await startChatNode(baseOptions());
-    expect(chat.getPeerStats()).toEqual({ discovered: 3, connected: 3, direct: 1, relayed: 2 });
+    expect(chat.getPeerStats()).toEqual({
+      discovered: 3,
+      connected: 3,
+      direct: 1,
+      relayed: 2,
+      peers: [
+        { agentId: "a", displayName: undefined, connected: true, direct: true },
+        { agentId: "b", displayName: undefined, connected: true, direct: false },
+        { agentId: "c", displayName: undefined, connected: true, direct: false },
+        { agentId: "d", displayName: undefined, connected: false, direct: false },
+      ],
+    });
+    await chat.shutDown();
+  });
+
+  it("identifies a peer by display name once seen in a room", async () => {
+    h.node = makeNode({
+      getConnectedAgents: () => ["self", "a"],
+      isDirectConnection: () => true,
+      agentStore: { get: () => undefined, getAll: () => [{ agentId: "a" }] },
+    });
+    const chat = await startChatNode(baseOptions());
+    // Learn "a"'s display name via an observed RoomJoin.
+    await h.builderOpts!.messageHandler(
+      "a",
+      encode({ v: 1, type: MsgType.RoomJoin, from: "a", room: "lobby", ts: 1, displayName: "Ada" }),
+    );
+    expect(chat.getPeerStats().peers).toContainEqual({
+      agentId: "a",
+      displayName: "Ada",
+      connected: true,
+      direct: true,
+    });
+    await chat.shutDown();
+  });
+});
+
+describe("NO_RESERVATION dial suppression", () => {
+  it("stops dialing a peer after a NO_RESERVATION failure", async () => {
+    let connects = 0;
+    h.node = makeNode({
+      isConnected: () => false,
+      agentStore: {
+        get: () => ({ agentId: "ghost", addresses: ["/relay/p2p-circuit/webrtc"] }),
+        getAll: () => [],
+      },
+      transport: {
+        connect: async () => {
+          connects++;
+          throw new Error(
+            "failed to connect via relay with status NO_RESERVATION",
+          );
+        },
+      },
+    });
+    const chat = await startChatNode(baseOptions());
+    h.observers.agentsReceived!(["ghost"]);
+    await new Promise((r) => setTimeout(r, 0)); // flush the dial microtasks
+    h.observers.agentsReceived!(["ghost"]); // second gossip must not redial
+    await new Promise((r) => setTimeout(r, 0));
+    expect(connects).toBe(1);
+    await chat.shutDown();
+  });
+
+  it("re-probes a NO_RESERVATION peer after the cooldown elapses", async () => {
+    vi.useFakeTimers();
+    try {
+      let connects = 0;
+      h.node = makeNode({
+        isConnected: () => false,
+        agentStore: {
+          get: () => ({ agentId: "ghost", addresses: ["/relay/p2p-circuit/webrtc"] }),
+          getAll: () => [],
+        },
+        transport: {
+          connect: async () => {
+            connects++;
+            throw new Error(
+              "failed to connect via relay with status NO_RESERVATION",
+            );
+          },
+        },
+      });
+      const chat = await startChatNode(baseOptions());
+      h.observers.agentsReceived!(["ghost"]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connects).toBe(1); // first dial, now paused
+      // Still within the cooldown: no redial.
+      await vi.advanceTimersByTimeAsync(30_000);
+      h.observers.agentsReceived!(["ghost"]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connects).toBe(1);
+      // Past the 60s cooldown: one re-probe is allowed.
+      await vi.advanceTimersByTimeAsync(31_000);
+      h.observers.agentsReceived!(["ghost"]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connects).toBe(2);
+      await chat.shutDown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not suppress on an unrelated dial failure", async () => {
+    let connects = 0;
+    h.node = makeNode({
+      isConnected: () => false,
+      agentStore: {
+        get: () => ({ agentId: "peer", addresses: ["/addr"] }),
+        getAll: () => [],
+      },
+      transport: {
+        connect: async () => {
+          connects++;
+          throw new Error("connection refused");
+        },
+      },
+    });
+    const chat = await startChatNode(baseOptions());
+    h.observers.agentsReceived!(["peer"]);
+    await new Promise((r) => setTimeout(r, 0));
+    h.observers.agentsReceived!(["peer"]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(connects).toBeGreaterThan(1);
+    await chat.shutDown();
+  });
+});
+
+describe("peer-connect announce", () => {
+  it("sends a targeted RoomJoin to a peer that connects while we are in a room", async () => {
+    const sent: Array<{ to: string; bytes: Uint8Array }> = [];
+    h.node = makeNode({
+      isConnected: () => true,
+      send: async (to, bytes) => {
+        sent.push({ to, bytes });
+      },
+    });
+    const chat = await startChatNode(baseOptions());
+    await chat.room.join("lobby");
+    sent.length = 0; // ignore the join broadcast
+    h.observers.peerConnected!("late-peer");
+    const targeted = sent.find((s) => s.to === "late-peer");
+    expect(targeted).toBeDefined();
+    const env = decode(targeted!.bytes);
+    expect(env?.type).toBe(MsgType.RoomJoin);
+    expect(env?.room).toBe("lobby");
     await chat.shutDown();
   });
 });

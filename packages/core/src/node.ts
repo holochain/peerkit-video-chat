@@ -6,9 +6,29 @@ import { decode, encode, MsgType, type Envelope } from "./envelope.js";
 import { Room, type RoomEvents, type RoomStateView, type RoomTransport } from "./room.js";
 import type { RosterEntry } from "./envelope.js";
 
+// Strip control characters from peer-supplied strings (e.g. display names)
+// before logging them, so a crafted value can't forge extra log lines.
+const CONTROL_CHARS = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
+const sanitizeForLog = (s: string): string => s.replace(CONTROL_CHARS, " ");
+
 export interface NetworkRoomEntry {
   name: string;
   members: RosterEntry[];
+}
+
+/**
+ * One peer as seen by this node, for identifying who is online/connected rather
+ * than just counting. `displayName` is resolved from any room we have observed
+ * the peer announce in (the agent store carries no name), so it is undefined for
+ * a peer we have never seen join a room.
+ */
+export interface PeerInfo {
+  agentId: AgentId;
+  displayName?: string;
+  /** True if there is an active transport link to this peer right now. */
+  connected: boolean;
+  /** True if the link is direct (not via a relay). Only meaningful when connected. */
+  direct: boolean;
 }
 
 /**
@@ -16,12 +36,14 @@ export interface NetworkRoomEntry {
  * actually reaching anyone. `discovered` counts agents known via the agent
  * store (peers seen online); `connected` counts active transport links, split
  * into `direct` and `relayed` (via PeerKit's {@link PeerkitNode.isDirectConnection}).
+ * `peers` lists the same set by identity (union of connected and discovered).
  */
 export interface PeerStats {
   discovered: number;
   connected: number;
   direct: number;
   relayed: number;
+  peers: PeerInfo[];
 }
 
 export interface ChatNodeOptions {
@@ -45,6 +67,7 @@ export interface ChatNode {
   readonly agentId: AgentId;
   readonly room: Room;
   setDisplayName(name: string): void;
+  setCameraState(on: boolean): void;
   sendSignal(toAgent: AgentId, signal: WebRtcSignal): Promise<void>;
   getPeerStats(): PeerStats;
   shutDown(): Promise<void>;
@@ -139,17 +162,59 @@ export async function startChatNode(
   const wrappedEvents: RoomEvents = {
     onState(view) {
       networkTrackOwnState(view);
+      if (view.kind === "inRoom") {
+        const roster = view.members
+          .map((m) => `${sanitizeForLog(m.displayName)} (${m.agentId.slice(0, 12)})`)
+          .join(", ");
+        console.info(
+          `chat-node: room "${view.room}" roster (${view.members.length}): ${roster}`,
+        );
+      } else {
+        console.info("chat-node: left room");
+      }
       options.events.onState(view);
     },
     onChat: options.events.onChat,
     onSignal: options.events.onSignal,
+    onMediaState: options.events.onMediaState,
   };
 
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── TEMPORARY: NO_RESERVATION dial cooldown ───────────────────────────────
+  // The agent store can advertise peers the relay has no circuit reservation
+  // for — e.g. a peer that left but whose signed AgentInfo has not yet expired.
+  // Dialing them fails with "NO_RESERVATION", and because we redial on every
+  // agent-store gossip this otherwise spams the relay indefinitely.
+  //
+  // Back off rather than ban: after a NO_RESERVATION, pause dials to that peer
+  // for a cooldown. We don't schedule our own retry timer — the re-probe is the
+  // next agent-store gossip after the cooldown lapses. PeerKit emits those
+  // continuously while connected to the relay (they are what drives the dial
+  // loop in the first place), so a paused peer is retried within a gossip
+  // interval of the cooldown expiring; if it fails again the cooldown re-arms.
+  // (If gossip stops entirely the relay link is down and there is nothing to
+  // dial anyway.) This caps the storm at ~one dial per cooldown while still
+  // recovering on its own from a transient relay blip — a hard ban would lock
+  // out a peer that briefly lost its reservation if it never dials us inbound. A
+  // peer that does connect inbound clears the cooldown immediately (see
+  // peerConnectedObserver). Cooldowns are in-memory, so they also reset across
+  // restarts (when agent ids change anyway).
+  //
+  // Remove this whole block (and its call sites) once PeerKit prunes
+  // reservation-less peers.
+  const NO_RESERVATION_COOLDOWN_MS = 60_000;
+  const noReservationUntil = new Map<AgentId, number>();
+  const isNoReservation = (err: unknown): boolean =>
+    err instanceof Error && err.message.includes("NO_RESERVATION");
+  const dialPaused = (agentId: AgentId): boolean =>
+    (noReservationUntil.get(agentId) ?? 0) > Date.now();
+  // ──────────────────────────────────────────────────────────────────────────
+
   const tryDial = async (node: PeerkitNode, agentId: AgentId): Promise<void> => {
     if (agentId === node.keyPair.agentId()) return;
     if (node.isConnected(agentId)) return;
+    if (dialPaused(agentId)) return; // TEMPORARY: see block above
     const info = node.agentStore.get(agentId);
     if (info === undefined) return;
     for (const addr of info.addresses) {
@@ -157,6 +222,14 @@ export async function startChatNode(
         await node.transport.connect(addr);
         if (node.isConnected(agentId)) return;
       } catch (err) {
+        // TEMPORARY: pause dials to a peer the relay won't reserve for.
+        if (isNoReservation(err)) {
+          noReservationUntil.set(agentId, Date.now() + NO_RESERVATION_COOLDOWN_MS);
+          console.info(
+            `chat-node: ${peerLabel(agentId)} has no relay reservation — pausing dials for ${NO_RESERVATION_COOLDOWN_MS / 1000}s`,
+          );
+          return;
+        }
         console.warn(
           `chat-node: dial ${agentId.slice(0, 12)} via ${addr} failed: ${(err as Error).message}`,
         );
@@ -165,9 +238,11 @@ export async function startChatNode(
   };
 
   const tryDialWithRetry = async (node: PeerkitNode, agentId: AgentId): Promise<void> => {
+    if (dialPaused(agentId)) return; // TEMPORARY: see block above
     await tryDial(node, agentId);
     for (const delay of [1000, 2000, 4000]) {
       if (node.isConnected(agentId)) return;
+      if (dialPaused(agentId)) return; // TEMPORARY: paused mid-retry
       await new Promise<void>((r) => setTimeout(r, delay));
       await tryDial(node, agentId);
     }
@@ -175,20 +250,66 @@ export async function startChatNode(
 
   let nodeRef: PeerkitNode | undefined;
 
+  // The agent store carries only agentId + addresses, never a display name. Names
+  // are learned solely from room join/roster traffic, tracked in networkRooms;
+  // resolve from there so connected/discovered peers can be identified by name.
+  function resolveDisplayName(agentId: AgentId): string | undefined {
+    for (const members of networkRooms.values()) {
+      const name = members.get(agentId);
+      if (name !== undefined) return name;
+    }
+    return undefined;
+  }
+
+  // Human-readable peer tag for logs: "name (abc123def456)" when the name is
+  // known, otherwise just the short agentId. Display names are peer-supplied, so
+  // strip control chars to stop a crafted name forging extra log lines.
+  function peerLabel(agentId: AgentId): string {
+    const name = resolveDisplayName(agentId);
+    const short = agentId.slice(0, 12);
+    return name !== undefined ? `${sanitizeForLog(name)} (${short})` : short;
+  }
+
   function computePeerStats(node: PeerkitNode): PeerStats {
     const self = node.keyPair.agentId();
     const connected = node.getConnectedAgents().filter((a) => a !== self);
+    const peers: PeerInfo[] = [];
+    const seen = new Set<AgentId>();
     let direct = 0;
-    for (const a of connected) if (node.isDirectConnection(a)) direct++;
+    for (const a of connected) {
+      const isDirect = node.isDirectConnection(a);
+      if (isDirect) direct++;
+      peers.push({
+        agentId: a,
+        displayName: resolveDisplayName(a),
+        connected: true,
+        direct: isDirect,
+      });
+      seen.add(a);
+    }
+    // `discovered` stays a raw count of live agent-store records (minus self), so
+    // it tracks PeerKit's TTL/renewal behaviour exactly. Add any discovered-but-
+    // not-connected agents to the identity list too.
     const discovered = new Set<AgentId>();
     for (const info of node.agentStore.getAll()) {
-      if (info.agentId !== self) discovered.add(info.agentId);
+      if (info.agentId === self) continue;
+      discovered.add(info.agentId);
+      if (!seen.has(info.agentId)) {
+        peers.push({
+          agentId: info.agentId,
+          displayName: resolveDisplayName(info.agentId),
+          connected: false,
+          direct: false,
+        });
+        seen.add(info.agentId);
+      }
     }
     return {
       discovered: discovered.size,
       connected: connected.length,
       direct,
       relayed: connected.length - direct,
+      peers,
     };
   }
 
@@ -220,13 +341,21 @@ export async function startChatNode(
       emitPeerStats();
       for (const id of agentIds) void tryDialWithRetry(node, id);
     })
-    .withPeerConnectedObserver(() => {
-      // New peer connection: re-announce so they learn we're in the room.
-      // Roster reconciliation happens via their roster reply (if they're also in the room).
+    .withPeerConnectedObserver((agentId) => {
+      // New peer connection: announce our room membership directly to *this* peer
+      // (not a broadcast — that races the connected-set bookkeeping and can miss
+      // the very peer that just connected). Roster reconciliation happens via
+      // their roster reply (if they're also in the room).
+      noReservationUntil.delete(agentId); // TEMPORARY: peer is reachable again
+      const live = nodeRef ? computePeerStats(nodeRef).connected : 0;
+      console.info(
+        `chat-node: peer connected ${peerLabel(agentId)} (${live} connected)`,
+      );
       emitPeerStats();
-      roomRef.current?.reannounce();
+      roomRef.current?.announceTo(agentId);
     })
     .withPeerDisconnectedObserver((agentId) => {
+      console.info(`chat-node: peer disconnected ${peerLabel(agentId)}`);
       // Remove disconnected peer from all tracked rooms.
       let changed = false;
       for (const [roomName, members] of networkRooms) {
@@ -300,6 +429,9 @@ export async function startChatNode(
     setDisplayName(name: string) {
       currentDisplayName = name;
       room.setDisplayName(name);
+    },
+    setCameraState(on: boolean) {
+      room.setCameraState(on);
     },
     async sendSignal(toAgent: AgentId, signal: WebRtcSignal) {
       await room.sendSignal(toAgent, signal);

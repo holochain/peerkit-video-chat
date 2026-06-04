@@ -9,6 +9,7 @@ export const MsgType = {
   WebRtcOffer: 5,
   WebRtcAnswer: 6,
   WebRtcIce: 7,
+  MediaState: 8,
 } as const;
 export type MsgType = (typeof MsgType)[keyof typeof MsgType];
 
@@ -43,6 +44,14 @@ export interface ChatMsg extends EnvelopeBase {
   body: string;
 }
 
+// Broadcast when a peer's camera (or other media) state changes, and on join, so
+// peers can render the right tile (live video vs placeholder) without relying on
+// unreliable inbound-track mute detection.
+export interface MediaStateMsg extends EnvelopeBase {
+  type: typeof MsgType.MediaState;
+  camera: boolean;
+}
+
 // Serializable payload carried over IPC and embedded in WebRTC envelope types.
 export type WebRtcSignal =
   | { kind: "offer"; sdp: string }
@@ -69,6 +78,7 @@ export type Envelope =
   | RoomLeaveMsg
   | RoomRosterMsg
   | ChatMsg
+  | MediaStateMsg
   | WebRtcOfferMsg
   | WebRtcAnswerMsg
   | WebRtcIceMsg;
@@ -124,6 +134,9 @@ function validate(raw: unknown): Envelope | null {
     case MsgType.ChatMsg:
       if (typeof r["body"] !== "string") return null;
       return r as unknown as ChatMsg;
+    case MsgType.MediaState:
+      if (typeof r["camera"] !== "boolean") return null;
+      return r as unknown as MediaStateMsg;
     case MsgType.WebRtcOffer:
     case MsgType.WebRtcAnswer:
       if (typeof r["sdp"] !== "string") return null;

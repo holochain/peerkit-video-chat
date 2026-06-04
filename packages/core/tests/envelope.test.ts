@@ -28,6 +28,7 @@ describe("envelope round-trip", () => {
       ],
     },
     { v: 1, type: MsgType.ChatMsg, from: "a", room: "lobby", ts: 4, body: "hi" },
+    { v: 1, type: MsgType.MediaState, from: "a", room: "lobby", ts: 8, camera: false },
     { v: 1, type: MsgType.WebRtcOffer, from: "a", room: "lobby", ts: 5, sdp: "o" },
     { v: 1, type: MsgType.WebRtcAnswer, from: "a", room: "lobby", ts: 6, sdp: "x" },
     { v: 1, type: MsgType.WebRtcIce, from: "a", room: "lobby", ts: 7, candidate: "c" },
@@ -83,6 +84,10 @@ describe("decode validation", () => {
     expect(decode(raw.encode({ ...base, type: MsgType.WebRtcOffer }))).toBeNull();
     expect(decode(raw.encode({ ...base, type: MsgType.WebRtcAnswer }))).toBeNull();
     expect(decode(raw.encode({ ...base, type: MsgType.WebRtcIce }))).toBeNull();
+    expect(decode(raw.encode({ ...base, type: MsgType.MediaState }))).toBeNull();
+    expect(
+      decode(raw.encode({ ...base, type: MsgType.MediaState, camera: "yes" })),
+    ).toBeNull();
   });
 
   it("rejects a roster whose members are malformed", () => {

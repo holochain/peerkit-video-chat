@@ -4,6 +4,7 @@ import {
   MsgType,
   type ChatMsg,
   type Envelope,
+  type MediaStateMsg,
   type RoomJoinMsg,
   type RoomLeaveMsg,
   type RoomRosterMsg,
@@ -36,6 +37,8 @@ export interface RoomEvents {
   onState(view: RoomStateView): void;
   onChat(chat: IncomingChat): void;
   onSignal(fromAgent: AgentId, signal: WebRtcSignal): void;
+  /** A peer announced its camera (on/off) state, on change or on join. */
+  onMediaState(fromAgent: AgentId, camera: boolean): void;
 }
 
 export function normalizeRoomName(name: string): string {
@@ -49,6 +52,9 @@ type State =
 export class Room {
   private state: State = { kind: "idle" };
   private displayName: string;
+  // Our own camera state, mirrored to peers. Tracked here so it can be included
+  // in announcements (join / targeted re-announce) and broadcast on change.
+  private cameraOn = true;
 
   constructor(
     private readonly transport: RoomTransport,
@@ -68,6 +74,17 @@ export class Room {
     }
   }
 
+  /**
+   * Set our camera state and, if in a room, broadcast the change to peers so
+   * their tile for us switches between live video and a placeholder. Safe to
+   * call before joining — the value is then included in the join announcement.
+   */
+  setCameraState(on: boolean): void {
+    if (on === this.cameraOn) return;
+    this.cameraOn = on;
+    if (this.state.kind === "inRoom") void this.broadcastMediaState();
+  }
+
   async join(rawRoomName: string): Promise<void> {
     if (this.state.kind === "inRoom") {
       throw new Error("already in a room; leave first");
@@ -81,6 +98,7 @@ export class Room {
     this.state = { kind: "inRoom", room, members };
     this.emitState();
     await this.broadcastJoin(room);
+    void this.broadcastMediaState();
   }
 
   async leave(): Promise<void> {
@@ -145,6 +163,9 @@ export class Room {
       case MsgType.ChatMsg:
         this.handleChat(env);
         break;
+      case MsgType.MediaState:
+        this.events.onMediaState(env.from, env.camera);
+        break;
       case MsgType.WebRtcOffer:
         this.events.onSignal(env.from, { kind: "offer", sdp: env.sdp });
         break;
@@ -184,6 +205,33 @@ export class Room {
   }
 
   /**
+   * Send a join announcement to one specific peer.
+   *
+   * Membership otherwise spreads only via {@link broadcastJoin}, which fans out
+   * to whoever is connected *at that instant*. On a freshly established link that
+   * races the transport's connected-set bookkeeping, so a broadcast can miss the
+   * very peer that just connected — leaving two peers transport-connected but
+   * absent from each other's roster. A targeted send keyed on the connect event's
+   * agentId closes that gap: the peer adds us and replies with its roster
+   * ({@link handleJoin}), so membership converges per link regardless of
+   * broadcast timing.
+   */
+  announceTo(agentId: AgentId): void {
+    if (this.state.kind !== "inRoom") return;
+    if (agentId === this.transport.agentId) return;
+    const env: RoomJoinMsg = {
+      v: 1,
+      type: MsgType.RoomJoin,
+      from: this.transport.agentId,
+      room: this.state.room,
+      ts: Date.now(),
+      displayName: this.displayName,
+    };
+    void this.transport.sendTo(agentId, env);
+    this.sendMediaStateTo(agentId);
+  }
+
+  /**
    * Current room membership as a snapshot. Lets a freshly (re)loaded UI learn
    * it is already in a room — e.g. after the renderer reloads on laptop wake
    * while the node kept running — without waiting for the next state event.
@@ -216,6 +264,27 @@ export class Room {
     await this.transport.broadcast(env);
   }
 
+  private mediaStateEnvelope(room: string): MediaStateMsg {
+    return {
+      v: 1,
+      type: MsgType.MediaState,
+      from: this.transport.agentId,
+      room,
+      ts: Date.now(),
+      camera: this.cameraOn,
+    };
+  }
+
+  private async broadcastMediaState(): Promise<void> {
+    if (this.state.kind !== "inRoom") return;
+    await this.transport.broadcast(this.mediaStateEnvelope(this.state.room));
+  }
+
+  private sendMediaStateTo(agentId: AgentId): void {
+    if (this.state.kind !== "inRoom") return;
+    void this.transport.sendTo(agentId, this.mediaStateEnvelope(this.state.room));
+  }
+
   private handleJoin(env: RoomJoinMsg): void {
     if (this.state.kind !== "inRoom") return;
     this.state.members.set(env.from, env.displayName);
@@ -230,6 +299,8 @@ export class Room {
       members: this.rosterEntries(),
     };
     void this.transport.sendTo(env.from, reply);
+    // Let the joiner know our current camera state up front.
+    this.sendMediaStateTo(env.from);
   }
 
   private handleLeave(env: RoomLeaveMsg): void {
