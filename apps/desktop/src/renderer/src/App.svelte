@@ -15,8 +15,10 @@
     handleSignal,
     initiateCall,
     closeAll,
+    setPeerNameResolver,
+    getLocalStream,
   } from './webrtc.js';
-  import { remoteStreams, speakingPeers } from './lib/stores.js';
+  import { remoteStreams, speakingPeers, remoteVideoLive } from './lib/stores.js';
   import type { PeerStats } from '@peerkit-video-chat/core';
   import {
     MESH_RECOMMENDED_MAX,
@@ -139,6 +141,11 @@
           n.delete(agentId);
           return n;
         });
+        remoteVideoLive.update(s => {
+          const n = new Set(s);
+          n.delete(agentId);
+          return n;
+        });
       } else {
         remoteStreams.update(m => {
           const n = new Map(m);
@@ -155,6 +162,13 @@
         return n;
       });
     });
+  });
+
+  // Let webrtc logs name peers by their roster display name rather than a raw id.
+  $effect(() => {
+    setPeerNameResolver((id) =>
+      roomMembers.find((m) => m.agentId === id)?.displayName,
+    );
   });
 
   // ── WebRTC call initiation ──────────────────────────────────────
@@ -228,6 +242,14 @@
       });
     });
 
+    const unsubMediaState = window.app.onMediaState((fromAgent, camera) => {
+      remoteVideoLive.update(s => {
+        const n = new Set(s);
+        if (camera) n.add(fromAgent); else n.delete(fromAgent);
+        return n;
+      });
+    });
+
     return () => {
       unsubState();
       unsubNetworkRooms();
@@ -235,6 +257,7 @@
       unsubRelayConnected();
       unsubChat();
       unsubSignal();
+      unsubMediaState();
     };
   });
 
@@ -278,6 +301,14 @@
           agentId: m.agentId,
           displayName: m.displayName,
         }));
+        // The renderer reloaded, so no local media has been re-acquired yet:
+        // seed the mic/camera controls from what is actually live (nothing)
+        // rather than their defaults, so the buttons don't claim we are sending
+        // audio/video, and tell peers our camera is off to match.
+        const stream = getLocalStream();
+        selfMic = stream?.getAudioTracks().some(t => t.readyState === 'live') ?? false;
+        selfCam = stream?.getVideoTracks().some(t => t.readyState === 'live') ?? false;
+        void window.app.setCameraState(selfCam);
         joinTime = Date.now();
         screen = 'call';
       } else {
@@ -317,6 +348,9 @@
     setMuted(!audio);
     try {
       await setCamMuted(!video);
+      // Set before joining so the join announcement carries the right camera
+      // state and peers render our tile correctly from the start.
+      await window.app.setCameraState(video);
       await window.app.joinRoom(currentRoom!);
       joinTime = Date.now();
       screen = 'call';
@@ -346,6 +380,7 @@
     try {
       await setCamMuted(selfCam);
       selfCam = !selfCam;
+      void window.app.setCameraState(selfCam);
     } catch (err) {
       pushToast(toastMessage(err));
     }

@@ -1,5 +1,7 @@
 import type { WebRtcSignal } from "@peerkit-video-chat/core";
 
+import { rendererLog } from "./lib/log.js";
+
 // Baked at build time by electron-vite `define` (see electron.vite.config.ts).
 // Both are "" for dev/unsigned builds with no TURN wired — then we run
 // STUN-only and skip the TURN entry entirely.
@@ -87,6 +89,14 @@ const RECOVERY_ATTEMPT_MS = 12000;
 // m-line at call setup (even when the camera is off), so toggling the camera
 // mid-call is a track swap via replaceTrack — no renegotiation required.
 const videoSenders = new Map<string, RTCRtpSender>();
+// Aggregated inbound MediaStream per peer. We add each received track to this
+// stream ourselves rather than relying on ev.streams[0]: a video m-line reserved
+// via addTransceiver while the camera is off carries no stream association, so
+// ev.streams is empty and the track would be dropped — yet ontrack does NOT fire
+// again when the peer later enables its camera via replaceTrack. Attaching the
+// track to a stable per-peer stream at negotiation means frames simply start
+// flowing into the already-attached tile when the camera comes on.
+const remoteStreamsByPeer = new Map<string, MediaStream>();
 
 let localStream: MediaStream | null = null;
 let preferredCameraId = '';
@@ -237,14 +247,33 @@ function stopSpeakingDetection(agentId: string): void {
 // Peer connection management
 // ---------------------------------------------------------------------------
 
-/** Short, stable peer tag for log lines. */
-function tag(agentId: string): string {
-  return agentId.slice(0, 12);
+// Resolves an agentId to its room display name so log lines name the peer rather
+// than just showing a truncated id. Set from the view layer, which knows the
+// current roster (see App.svelte). Defaults to "unknown" until wired.
+let resolvePeerName: (agentId: string) => string | undefined = () => undefined;
+
+/** Register the roster name resolver used to label peers in webrtc logs. */
+export function setPeerNameResolver(
+  fn: (agentId: string) => string | undefined,
+): void {
+  resolvePeerName = fn;
 }
 
-/** Positive lifecycle log. Failures stay on console.warn at their call sites. */
+/** Short, stable peer tag for log lines: "name (abc123def456)" or the short id. */
+function tag(agentId: string): string {
+  const name = resolvePeerName(agentId);
+  const short = agentId.slice(0, 12);
+  return name !== undefined ? `${name} (${short})` : short;
+}
+
+/** Positive lifecycle log for a peer (info level). */
 function logPeer(agentId: string, msg: string): void {
-  console.info(`webrtc: ${tag(agentId)} ${msg}`);
+  rendererLog("info", `webrtc: ${tag(agentId)} ${msg}`);
+}
+
+/** Fault/warning log for a peer (warn level). */
+function warnPeer(agentId: string, msg: string): void {
+  rendererLog("warn", `webrtc: ${tag(agentId)} ${msg}`);
 }
 
 /**
@@ -305,16 +334,23 @@ function buildPeerConnection(
     window.app
       .sendSignal(agentId, { kind: "ice", candidate: payload })
       .catch((err: unknown) => {
-        console.warn(
-          `webrtc: ICE send to ${agentId.slice(0, 12)} failed:`,
-          err,
-        );
+        warnPeer(agentId, `ICE send failed: ${String(err)}`);
       });
   };
 
   pc.ontrack = (ev) => {
-    const stream = ev.streams[0];
-    if (stream === undefined) return;
+    // Aggregate every received track into one stable per-peer stream. Don't rely
+    // on ev.streams[0] — it is empty for a track on a transceiver reserved
+    // without a stream (camera-off join), and ontrack won't fire again when the
+    // camera is later enabled via replaceTrack.
+    let stream = remoteStreamsByPeer.get(agentId);
+    if (stream === undefined) {
+      stream = new MediaStream();
+      remoteStreamsByPeer.set(agentId, stream);
+    }
+    if (!stream.getTracks().some((t) => t.id === ev.track.id)) {
+      stream.addTrack(ev.track);
+    }
 
     // Notify view layer — it attaches the stream to the peer's video tile.
     onRemoteStream?.(agentId, stream);
@@ -324,6 +360,10 @@ function buildPeerConnection(
       stopSpeakingDetection(agentId);
       startSpeakingDetection(agentId, stream);
     }
+    // Whether the peer's video is actually showing is driven by an explicit
+    // camera-state message over the room channel (see App.svelte), not by the
+    // inbound track's mute state, which Chromium reports unreliably for
+    // replaceTrack(null).
   };
 
   // Arm the DTLS-stall watchdog the moment ICE connectivity is established.
@@ -335,6 +375,9 @@ function buildPeerConnection(
   // run the recovery ladder.
   pc.oniceconnectionstatechange = () => {
     const ice = pc.iceConnectionState;
+    // Log every transition. The transient "disconnected" (ICE consent loss)
+    // that precedes "failed" is the key signal when diagnosing connection flap.
+    logPeer(agentId, `ice → ${ice}`);
     if (ice === "connected" || ice === "completed") {
       if (pc.connectionState !== "connected") armDtlsWatchdog(agentId, pc);
     } else if (ice === "failed") {
@@ -344,6 +387,7 @@ function buildPeerConnection(
 
   pc.onconnectionstatechange = () => {
     const state = pc.connectionState;
+    logPeer(agentId, `conn → ${state}`);
     if (state === "connected") {
       // Fully established — clear the watchdog and reset the recovery ladder.
       // Read the attempt counters before clearing: a non-zero count means this
@@ -446,9 +490,7 @@ function armRecoveryTimeout(agentId: string): void {
     const pc = peers.get(agentId);
     if (pc === undefined) return; // already closed
     if (pc.connectionState === "connected") return; // attempt succeeded
-    console.warn(
-      `webrtc: recovery attempt to ${agentId.slice(0, 12)} stalled (conn=${pc.connectionState}) — advancing ladder`,
-    );
+    warnPeer(agentId, `recovery attempt stalled (conn=${pc.connectionState}) — advancing ladder`);
     recovering.delete(agentId); // release the guard so the next rung can run
     void recoverPeer(agentId, pc);
   }, RECOVERY_ATTEMPT_MS);
@@ -477,7 +519,7 @@ async function fullReconnect(agentId: string, relayOnly = false): Promise<void> 
   try {
     stream = await acquireLocalStream();
   } catch (err) {
-    console.warn(`webrtc: full reconnect to ${agentId.slice(0, 12)} aborted (no media):`, err);
+    warnPeer(agentId, `full reconnect aborted (no media): ${String(err)}`);
     closePeer(agentId);
     return;
   }
@@ -502,7 +544,7 @@ async function fullReconnect(agentId: string, relayOnly = false): Promise<void> 
     await pc.setLocalDescription(offer);
     await window.app.sendSignal(agentId, { kind: "offer", sdp: offer.sdp ?? "" });
   } catch (err) {
-    console.warn(`webrtc: full reconnect offer to ${agentId.slice(0, 12)} failed:`, err);
+    warnPeer(agentId, `full reconnect offer failed: ${String(err)}`);
     closePeer(agentId);
     return;
   }
@@ -533,7 +575,7 @@ function armDtlsWatchdog(agentId: string, pc: RTCPeerConnection): void {
     if (dtls!.state === "connected") {
       clearDtlsWatchdog(agentId);
     } else if (dtls!.state === "failed") {
-      console.warn(`webrtc: DTLS failed to ${agentId.slice(0, 12)} — recovering`);
+      warnPeer(agentId, "DTLS failed — recovering");
       void recoverPeer(agentId, pc);
     }
   };
@@ -541,8 +583,9 @@ function armDtlsWatchdog(agentId: string, pc: RTCPeerConnection): void {
   const timer = setTimeout(() => {
     if (peers.get(agentId) !== pc) return; // superseded
     if (pc.connectionState === "connected") return; // healed in the meantime
-    console.warn(
-      `webrtc: DTLS stall to ${agentId.slice(0, 12)} (ice=${pc.iceConnectionState}, dtls=${dtls?.state ?? "n/a"}, conn=${pc.connectionState}) — recovering`,
+    warnPeer(
+      agentId,
+      `DTLS stall (ice=${pc.iceConnectionState}, dtls=${dtls?.state ?? "n/a"}, conn=${pc.connectionState}) — recovering`,
     );
     void recoverPeer(agentId, pc);
   }, DTLS_STALL_MS);
@@ -630,7 +673,7 @@ async function restartIce(agentId: string, pc: RTCPeerConnection): Promise<void>
     await pc.setLocalDescription(offer);
     await window.app.sendSignal(agentId, { kind: "offer", sdp: offer.sdp ?? "" });
   } catch (err) {
-    console.warn(`webrtc: ICE restart to ${agentId.slice(0, 12)} failed:`, err);
+    warnPeer(agentId, `ICE restart failed: ${String(err)}`);
     closePeer(agentId);
   }
 }
@@ -667,6 +710,7 @@ async function drainPendingCandidates(
 
 export async function initiateCall(toAgentId: string): Promise<void> {
   if (peers.has(toAgentId)) return;
+  logPeer(toAgentId, "initiating call (sending offer)");
   const stream = await acquireLocalStream();
   const pc = buildPeerConnection(toAgentId);
   offererPeers.add(toAgentId);
@@ -721,6 +765,7 @@ export async function handleSignal(
       clearDtlsWatchdog(fromAgentId);
       recovering.delete(fromAgentId);
     }
+    logPeer(fromAgentId, "received offer — answering");
     const stream = await acquireLocalStream();
     const pc = buildPeerConnection(fromAgentId);
     for (const track of stream.getTracks()) {
@@ -757,9 +802,7 @@ export async function handleSignal(
     try {
       init = JSON.parse(signal.candidate) as RTCIceCandidateInit;
     } catch {
-      console.warn(
-        `webrtc: malformed ICE candidate from ${fromAgentId.slice(0, 12)}`,
-      );
+      warnPeer(fromAgentId, "malformed ICE candidate received");
       return;
     }
     if (pc === undefined) {
@@ -775,6 +818,7 @@ export async function handleSignal(
 
   // answer
   if (pc === undefined) return;
+  logPeer(fromAgentId, "received answer");
   await pc.setRemoteDescription({ type: "answer", sdp: signal.sdp });
   await drainPendingCandidates(pc, fromAgentId);
 }
@@ -792,6 +836,7 @@ export function closePeer(agentId: string): void {
   clearAcceptorGiveup(agentId);
   clearRecoveryTimeout(agentId);
   videoSenders.delete(agentId);
+  remoteStreamsByPeer.delete(agentId);
   stopSpeakingDetection(agentId);
   onRemoteStream?.(agentId, null);
 }
@@ -813,6 +858,7 @@ export function closeAll(): void {
   for (const id of recoveryTimers.values()) clearTimeout(id);
   recoveryTimers.clear();
   videoSenders.clear();
+  remoteStreamsByPeer.clear();
   // Stop all remaining analyser nodes (includes local speaking detection).
   for (const agentId of [...analyserCleanup.keys()]) {
     stopSpeakingDetection(agentId);

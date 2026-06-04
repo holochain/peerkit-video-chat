@@ -3,7 +3,7 @@
   import AvatarMini from '../components/AvatarMini.svelte';
   import ChatOverlay from '../components/ChatOverlay.svelte';
   import { get } from 'svelte/store';
-  import { remoteStreams, speakingPeers } from '../lib/stores.js';
+  import { remoteStreams, speakingPeers, remoteVideoLive } from '../lib/stores.js';
   import { shortId, makeInitials } from '../lib/helpers.js';
   import { getLocalStream } from '../webrtc.js';
 
@@ -84,6 +84,17 @@
       unread += count - lastSeenCount;
     }
     lastSeenCount = count;
+  });
+
+  // Whether our own camera is actually producing video, not just intended on.
+  // selfCam is the user's intent; the camera can be denied/absent/failed, in
+  // which case there is no live local video track and the tile must show the
+  // placeholder rather than an empty (purple, textless) <video>. Recomputes when
+  // selfCam toggles, which brackets every track add/remove.
+  const selfHasVideo = $derived.by(() => {
+    void selfCam; // dependency: re-read the local stream on every cam toggle
+    const s = getLocalStream();
+    return !!s && s.getVideoTracks().some((t) => t.readyState === 'live');
   });
 
   // Build all tiles: self first, then remote members
@@ -195,12 +206,12 @@
         {@const isSelf = tile.isSelf}
         {@const speaking = $speakingPeers.has(tile.agentId)}
         {@const hasMic = isSelf ? selfMic : true}
-        {@const hasCam = isSelf ? selfCam : ($remoteStreams.has(tile.agentId) && $remoteStreams.get(tile.agentId)!.getVideoTracks().length > 0)}
+        {@const hasCam = isSelf ? (selfCam && selfHasVideo) : ($remoteStreams.has(tile.agentId) && $remoteVideoLive.has(tile.agentId))}
         <div
           class="tile {speaking ? 'speaking' : ''}"
         >
-          <div class="tile-content {(isSelf && !selfCam) ? 'cam-off' : (!isSelf && !hasCam) ? 'cam-off' : ''}">
-            {#if isSelf && selfCam}
+          <div class="tile-content {hasCam ? '' : 'cam-off'}">
+            {#if isSelf && hasCam}
               <video
                 autoplay
                 muted
