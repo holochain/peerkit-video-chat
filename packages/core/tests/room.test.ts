@@ -20,8 +20,14 @@ function makeEvents(): RoomEvents & {
   onState: ReturnType<typeof vi.fn>;
   onChat: ReturnType<typeof vi.fn>;
   onSignal: ReturnType<typeof vi.fn>;
+  onMediaState: ReturnType<typeof vi.fn>;
 } {
-  return { onState: vi.fn(), onChat: vi.fn(), onSignal: vi.fn() };
+  return {
+    onState: vi.fn(),
+    onChat: vi.fn(),
+    onSignal: vi.fn(),
+    onMediaState: vi.fn(),
+  };
 }
 
 describe("normalizeRoomName", () => {
@@ -385,5 +391,63 @@ describe("Room convergence edges", () => {
   it("ignores a leave for a peer that never joined", () => {
     room.onIncoming({ v: 1, type: MsgType.RoomLeave, from: "ghost", room: "lobby", ts: 1 }, "ghost");
     expect(events.onState).not.toHaveBeenCalled();
+  });
+});
+
+describe("Room media state", () => {
+  let transport: ReturnType<typeof makeTransport>;
+  let events: ReturnType<typeof makeEvents>;
+  let room: Room;
+
+  beforeEach(() => {
+    transport = makeTransport();
+    events = makeEvents();
+    room = new Room(transport, events, "Me");
+  });
+
+  function broadcasts(): Envelope[] {
+    return transport.broadcast.mock.calls.map((c) => c[0] as Envelope);
+  }
+
+  it("broadcasts a MediaState on join", async () => {
+    await room.join("lobby");
+    const media = broadcasts().find((e) => e.type === MsgType.MediaState);
+    expect(media).toMatchObject({ type: MsgType.MediaState, from: SELF, room: "lobby", camera: true });
+  });
+
+  it("broadcasts the camera state set before joining", async () => {
+    room.setCameraState(false);
+    await room.join("lobby");
+    const media = broadcasts().find((e) => e.type === MsgType.MediaState);
+    expect(media).toMatchObject({ type: MsgType.MediaState, camera: false });
+  });
+
+  it("broadcasts a change while in a room, and ignores a no-op set", async () => {
+    await room.join("lobby");
+    transport.broadcast.mockClear();
+    room.setCameraState(true); // no change from default
+    expect(transport.broadcast).not.toHaveBeenCalled();
+    room.setCameraState(false);
+    expect(broadcasts()).toContainEqual(
+      expect.objectContaining({ type: MsgType.MediaState, camera: false }),
+    );
+  });
+
+  it("surfaces an incoming MediaState for the current room", async () => {
+    await room.join("lobby");
+    room.onIncoming(
+      { v: 1, type: MsgType.MediaState, from: "peer1", room: "lobby", ts: 1, camera: false },
+      "peer1",
+    );
+    expect(events.onMediaState).toHaveBeenCalledWith("peer1", false);
+  });
+
+  it("sends our MediaState to a peer we announce to", async () => {
+    await room.join("lobby");
+    room.announceTo("peer1");
+    const sent = transport.sendTo.mock.calls.map((c) => c[1] as Envelope);
+    expect(sent).toContainEqual(
+      expect.objectContaining({ type: MsgType.MediaState, camera: true }),
+    );
   });
 });

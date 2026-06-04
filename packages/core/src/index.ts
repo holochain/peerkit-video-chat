@@ -23,5 +23,6 @@ export type {
   ChatNode,
   ChatNodeOptions,
   NetworkRoomEntry,
+  PeerInfo,
   PeerStats,
 } from "./node.js";
