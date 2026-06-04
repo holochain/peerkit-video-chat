@@ -23,11 +23,17 @@ const api = {
     ipcRenderer.invoke("app:requestMediaAccess"),
   setDisplayName: (name: string): Promise<void> =>
     ipcRenderer.invoke("chat:setDisplayName", name),
+  setCameraState: (on: boolean): Promise<void> =>
+    ipcRenderer.invoke("chat:setCameraState", on),
   joinRoom: (name: string): Promise<void> =>
     ipcRenderer.invoke("chat:joinRoom", name),
   leaveRoom: (): Promise<void> => ipcRenderer.invoke("chat:leaveRoom"),
   sendChat: (body: string): Promise<void> =>
     ipcRenderer.invoke("chat:sendChat", body),
+
+  // Fire-and-forget: forward a renderer log line to the main-process log file.
+  log: (level: string, line: string): void =>
+    ipcRenderer.send("app:log", level, line),
 
   onState: (handler: (view: RoomStateView) => void): (() => void) => {
     const listener = (_event: unknown, view: RoomStateView): void => handler(view);
@@ -42,6 +48,19 @@ const api = {
     ipcRenderer.on("chat:chat", listener);
     return () => {
       ipcRenderer.off("chat:chat", listener);
+    };
+  },
+
+  onMediaState: (
+    handler: (fromAgent: string, camera: boolean) => void,
+  ): (() => void) => {
+    const listener = (
+      _event: unknown,
+      payload: { fromAgent: string; camera: boolean },
+    ): void => handler(payload.fromAgent, payload.camera);
+    ipcRenderer.on("chat:mediaState", listener);
+    return () => {
+      ipcRenderer.off("chat:mediaState", listener);
     };
   },
 

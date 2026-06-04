@@ -1,3 +1,12 @@
+// Must be imported before @peerkit-video-chat/core so process.env.DEBUG is set
+// before libp2p/weald initialises (see logging.ts).
+import {
+  appendRendererLog,
+  closeLogging,
+  getLogDir,
+  initLogging,
+} from "./logging.js";
+
 import Store from "electron-store";
 
 import {
@@ -13,6 +22,8 @@ import {
   app,
   BrowserWindow,
   ipcMain,
+  Menu,
+  type MenuItemConstructorOptions,
   session,
   shell,
   systemPreferences,
@@ -129,6 +140,8 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
           onChat: (incoming: IncomingChat) => emit("chat:chat", incoming),
           onSignal: (fromAgent: string, signal: WebRtcSignal) =>
             emit("rtc:signal", { fromAgent, signal }),
+          onMediaState: (fromAgent: string, camera: boolean) =>
+            emit("chat:mediaState", { fromAgent, camera }),
         },
         onNetworkRooms: (rooms: NetworkRoomEntry[]) =>
           emit("chat:networkRooms", rooms),
@@ -160,6 +173,11 @@ ipcMain.handle("chat:setDisplayName", (_event, name: string) => {
   chat.setDisplayName(name);
 });
 
+ipcMain.handle("chat:setCameraState", (_event, on: boolean) => {
+  if (chat === undefined) throw new Error("chat node not initialized");
+  chat.setCameraState(on);
+});
+
 ipcMain.handle("chat:joinRoom", async (_event, name: string) => {
   if (chat === undefined) throw new Error("chat node not initialized");
   await chat.room.join(name);
@@ -183,7 +201,50 @@ ipcMain.handle(
   },
 );
 
-app.whenReady().then(() => {
+async function openLogsFolder(): Promise<void> {
+  const dir = getLogDir();
+  if (dir === undefined) return;
+  const err = await shell.openPath(dir);
+  if (err !== "") console.warn(`main: failed to open logs folder: ${err}`);
+}
+
+// Build the application menu, preserving the standard platform roles and adding
+// an "Open Logs Folder" item under Help so testers can grab their logs without a
+// terminal. setApplicationMenu(null) would drop copy/paste/devtools, so we keep
+// the role-based defaults.
+function buildMenu(): void {
+  const isMac = process.platform === "darwin";
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [{ role: "appMenu" as const }]
+      : []),
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Open Logs Folder",
+          click: () => {
+            void openLogsFolder();
+          },
+        },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+app.whenReady().then(async () => {
+  try {
+    const logPath = await initLogging(app.getPath("logs"));
+    console.info(`main: logging to ${logPath}`);
+  } catch (err) {
+    console.warn("main: failed to initialise file logging:", err);
+  }
+  buildMenu();
   void createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
@@ -191,7 +252,11 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // Quit on every platform, including macOS. The usual macOS convention keeps
+  // the app running with no window (reopen from the dock), but for this
+  // single-window showcase that just looks like the close button "minimised" the
+  // app and leaves it stranded in the dock, so closing the window quits.
+  app.quit();
 });
 
 ipcMain.handle("store:load", () => store.store);
@@ -208,8 +273,15 @@ ipcMain.handle("app:openExternal", async (_event, url: string) => {
   await shell.openExternal(url);
 });
 
+// Fire-and-forget log lines forwarded from the renderer (webrtc / UI). Uses
+// ipcRenderer.send (not invoke) so the renderer never awaits a logging round-trip.
+ipcMain.on("app:log", (_event, level: string, line: string) => {
+  appendRendererLog(level, line);
+});
+
 app.on("before-quit", async () => {
   await chat?.shutDown();
+  closeLogging();
 });
 
 ipcMain.handle("app:requestMediaAccess", async () => {
