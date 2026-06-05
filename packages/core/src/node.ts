@@ -1,6 +1,10 @@
 import type { AgentId, RelayAddress } from "@peerkit/api";
 import type { WebRtcSignal } from "./envelope.js";
-import { PeerkitNodeBuilder, type PeerkitNode } from "@peerkit/peerkit";
+import {
+  PeerkitNodeBuilder,
+  type PeerkitNode,
+  type PeerkitNodeTransportFactory,
+} from "@peerkit/peerkit";
 
 import { decode, encode, MsgType, type Envelope } from "./envelope.js";
 import { Room, type RoomEvents, type RoomStateView, type RoomTransport } from "./room.js";
@@ -51,6 +55,7 @@ export interface ChatNodeOptions {
   bootstrapRelays: RelayAddress[];
   displayName: string;
   events: RoomEvents;
+  transportFactory?: PeerkitNodeTransportFactory;
   /** Called whenever the observed set of active network rooms changes. */
   onNetworkRooms?: (rooms: NetworkRoomEntry[]) => void;
   /** Called whenever peer connectivity changes (discovered/connected counts). */
@@ -375,6 +380,9 @@ export async function startChatNode(
 
   if (options.id !== undefined) {
     builder.withId(options.id);
+  }
+  if (options.transportFactory !== undefined) {
+    builder.withTransportFactory(options.transportFactory);
   }
 
   const node = await builder.build();

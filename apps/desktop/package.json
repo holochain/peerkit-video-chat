@@ -28,6 +28,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
     "@peerkit-video-chat/core": "*",
+    "@peerkit-video-chat/media": "*",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "electron": "^42.3.3",
     "electron-builder": "^26.15.2",

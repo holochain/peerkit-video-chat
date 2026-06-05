@@ -5,7 +5,7 @@
   import { get } from 'svelte/store';
   import { remoteStreams, speakingPeers, remoteVideoLive } from '../lib/stores.js';
   import { shortId, makeInitials } from '../lib/helpers.js';
-  import { getLocalStream } from '../webrtc.js';
+  import { getLocalStream } from '../media.js';
 
   interface RoomMember {
     agentId: string;
@@ -216,14 +216,14 @@
                 autoplay
                 muted
                 playsinline
-                style="width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1)"
+                style="width:100%;height:100%;object-fit:contain;display:block;transform:scaleX(-1)"
                 use:videoSrc={tile.agentId}
               ></video>
             {:else if !isSelf && hasCam}
               <video
                 autoplay
                 playsinline
-                style="width:100%;height:100%;object-fit:cover;display:block"
+                style="width:100%;height:100%;object-fit:contain;display:block"
                 use:videoSrc={tile.agentId}
               ></video>
             {:else}

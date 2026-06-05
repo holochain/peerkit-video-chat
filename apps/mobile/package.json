@@ -1,0 +1,48 @@
+{
+  "name": "@peerkit-video-chat/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Expo React Native app for peerkit-video-chat",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "prebuild": "expo prebuild",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@config-plugins/react-native-webrtc": "^13.0.0",
+    "@expo/vector-icons": "^15.1.1",
+    "@peerkit-video-chat/core": "*",
+    "@peerkit-video-chat/media": "*",
+    "@peerkit/api": "^0.1.0-alpha.12",
+    "@peerkit/peerkit": "^0.1.0-alpha.12",
+    "@peerkit/transport-libp2p-react-native": "file:../../../peerkit/packages/transport-libp2p-react-native",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "buffer": "^6.0.3",
+    "events": "^3.3.0",
+    "expo": "^54.0.0",
+    "expo-constants": "^18.0.0",
+    "expo-dev-client": "^6.0.0",
+    "expo-keep-awake": "~15.0.8",
+    "expo-system-ui": "~6.0.9",
+    "process": "^0.11.10",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-get-random-values": "^1.11.0",
+    "react-native-permissions": "^5.4.4",
+    "react-native-quick-crypto": "^0.7.17",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-webrtc": "^124.0.7",
+    "stream-browserify": "^3.0.0"
+  },
+  "devDependencies": {
+    "@babel/plugin-transform-class-properties": "^7.27.1",
+    "@babel/plugin-transform-private-methods": "^7.27.1",
+    "@babel/plugin-transform-private-property-in-object": "^7.27.1",
+    "@types/react": "^19.2.16",
+    "typescript": "~5.9.2"
+  }
+}

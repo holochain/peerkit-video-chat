@@ -1,14 +1,14 @@
 /**
- * Recovery-ladder tests for the renderer WebRTC layer (webrtc.ts).
+ * Recovery-ladder tests for the shared WebRTC media controller.
  *
  * Drives the module black-box: initiateCall / handleSignal / closePeer against a
  * MockPeerConnection, firing lifecycle transitions by hand and asserting on the
- * signals emitted via window.app.sendSignal. Fake timers exercise the DTLS
+ * signals emitted via the injected sendSignal callback. Fake timers exercise the DTLS
  * watchdog, the per-attempt recovery timeout, and the acceptor give-up timer.
  *
  * Globals and the module are (re)installed per test so module-level recovery
- * state never leaks between cases. TURN is configured via the __TURN_*__ build
- * constants (see vitest.config.ts `define`) so the relay-only rung is active.
+ * state never leaks between cases. TURN is configured through the controller
+ * dependencies so the relay-only rung is active.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,13 +33,15 @@ const SELF = "agent-self";
 const PEER = "agent-zzz";
 
 let h: Harness;
-// Re-imported per test so module state (peers, recovery maps) starts clean.
-let webrtc: typeof import("../src/renderer/src/webrtc");
+// Re-imported per test so the binding picks up freshly-installed globals.
+let webrtc: typeof import("../src/index.web");
+// A fresh controller instance per test → recovery state never leaks between cases.
+let ctrl: import("../src/index.js").MediaController;
 
 /** Bring a freshly-initiated offerer connection up to fully connected. */
 async function connect(pc: MockPeerConnection): Promise<void> {
   // Answer the initial offer, then walk the transports to connected.
-  await webrtc.handleSignal(PEER, {
+  await ctrl.handleSignal(PEER, {
     kind: "answer",
     sdp: sdpWithFingerprint("FP_REMOTE_0"),
   });
@@ -76,29 +78,54 @@ beforeEach(async () => {
   resetPeers();
   h = installGlobals();
   vi.resetModules();
-  webrtc = await import("../src/renderer/src/webrtc");
+  webrtc = await import("../src/index.web");
+  ctrl = webrtc.createMediaController({
+    sendSignal: h.sendSignal,
+    requestMediaAccess: async () => ({ camera: true, microphone: true }),
+    iceServers: [
+      { urls: "stun:stun.cloudflare.com:3478" },
+      {
+        urls: [
+          "turn:turn.example.test:3478?transport=udp",
+          "turns:turn.example.test:443?transport=tcp",
+        ],
+        username: "test",
+        credential: "test",
+      },
+    ],
+  });
 });
 
 afterEach(() => {
-  webrtc.closeAll();
+  ctrl.closeAll();
   vi.clearAllTimers();
   vi.useRealTimers();
 });
 
 describe("offer/answer setup", () => {
   it("initiateCall sends an offer and marks us the offerer", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
 
     expect(createdPeers).toHaveLength(1);
     const offers = offersTo().filter((s) => s.kind === "offer");
     expect(offers).toHaveLength(1);
   });
+
+  it("methods work when destructured off the controller (desktop usage)", async () => {
+    // The desktop renderer does `const { initiateCall, closeAll } = controller`
+    // and calls them free-standing — methods must keep their `this` binding.
+    const { initiateCall, closeAll } = ctrl;
+    await initiateCall(PEER);
+    await flush();
+    expect(createdPeers).toHaveLength(1);
+    expect(() => closeAll()).not.toThrow();
+  });
 });
 
 describe("ICE-restart rung", () => {
   it("restarts ICE on the same pc when the connection fails", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
@@ -113,7 +140,7 @@ describe("ICE-restart rung", () => {
   });
 
   it("restarts up to 3 times before escalating to a full reconnect", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
@@ -135,7 +162,7 @@ describe("ICE-restart rung", () => {
 
 describe("full-reconnect rung", () => {
   it("builds a fresh pc once ICE restarts are exhausted", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const first = createdPeers[0]!;
     await connect(first);
@@ -156,7 +183,7 @@ describe("full-reconnect rung", () => {
   });
 
   it("forces relay-only on the second full reconnect", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const first = createdPeers[0]!;
     await connect(first);
@@ -176,7 +203,7 @@ describe("full-reconnect rung", () => {
   });
 
   it("closes the peer after the ladder is exhausted", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const first = createdPeers[0]!;
     await connect(first);
@@ -193,10 +220,10 @@ describe("full-reconnect rung", () => {
 
 describe("DTLS-stall watchdog", () => {
   it("recovers immediately when DTLS fails (fail-fast)", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -209,10 +236,10 @@ describe("DTLS-stall watchdog", () => {
   });
 
   it("recovers when DTLS hangs past the backstop timer", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -227,7 +254,7 @@ describe("DTLS-stall watchdog", () => {
   });
 
   it("does not recover when DTLS completes before the backstop", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc); // reaches connected, clearing the watchdog
@@ -242,7 +269,7 @@ describe("DTLS-stall watchdog", () => {
 
 describe("per-attempt recovery timeout (offerer wedge guard)", () => {
   it("advances the ladder when a restart answer never arrives", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
@@ -262,11 +289,11 @@ describe("per-attempt recovery timeout (offerer wedge guard)", () => {
 
 describe("recovery-offer routing by DTLS fingerprint", () => {
   it("applies a same-fingerprint offer to the existing pc (ICE restart)", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     // Accept the peer's answer carrying their fingerprint.
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -278,7 +305,7 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
     // Remote sends a recovery offer with the SAME fingerprint = ICE restart.
     pc._setConn("failed"); // allow mid-call offer
     await flush();
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "offer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -290,10 +317,10 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
   });
 
   it("rebuilds on a new-fingerprint offer (remote reload)", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -305,7 +332,7 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
     pc._setConn("failed");
     await flush();
     // DIFFERENT fingerprint = remote rebuilt. Stale pc discarded, fresh accepts.
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "offer",
       sdp: sdpWithFingerprint("FP_REMOTE_NEW"),
     });
@@ -321,7 +348,7 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
 describe("acceptor give-up", () => {
   it("reaps the connection when no recovery offer arrives in time", async () => {
     // We are the acceptor: the peer initiates by sending us an offer.
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "offer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -345,14 +372,14 @@ describe("acceptor give-up", () => {
 
 describe("cleanup", () => {
   it("closePeer cancels timers so no recovery fires afterwards", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
 
     pc._setConn("failed"); // arms the per-attempt timeout
     await flush();
-    webrtc.closePeer(PEER);
+    ctrl.closePeer(PEER);
     const peersAfterClose = createdPeers.length;
 
     await vi.advanceTimersByTimeAsync(RECOVERY_ATTEMPT_MS + DTLS_STALL_MS + 10);

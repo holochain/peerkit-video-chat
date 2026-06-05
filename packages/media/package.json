@@ -1,0 +1,37 @@
+{
+  "name": "@peerkit-video-chat/media",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared WebRTC media controller for peerkit-video-chat",
+  "type": "module",
+  "exports": {
+    ".": {
+      "react-native": {
+        "import": "./dist/index.rn.js",
+        "types": "./dist/index.d.ts"
+      },
+      "import": {
+        "import": "./dist/index.web.js",
+        "types": "./dist/index.d.ts"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "peerDependencies": {
+    "react-native-permissions": "*",
+    "react-native-webrtc": "*"
+  },
+  "peerDependenciesMeta": {
+    "react-native-permissions": {
+      "optional": true
+    },
+    "react-native-webrtc": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@peerkit-video-chat/core": "*"
+  }
+}

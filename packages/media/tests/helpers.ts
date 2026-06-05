@@ -1,16 +1,16 @@
 /**
- * Test harness for the renderer WebRTC layer.
+ * Test harness for the shared WebRTC media controller.
  *
- * webrtc.ts is browser code with no DOM in the vitest (node) env and keeps its
+ * The browser media implementation has no DOM in the vitest (node) env and keeps its
  * recovery logic in module-private functions. So the suite drives it black-box —
  * through the exported initiateCall / handleSignal / closePeer surface — against
  * a hand-rolled RTCPeerConnection mock whose state transitions the test fires by
- * hand, asserting on the signals emitted via window.app.sendSignal.
+ * hand, asserting on the injected sendSignal callback.
  */
 
 import { vi } from "vitest";
 
-// Recovery timer constants — mirror the (module-private) values in webrtc.ts so
+// Recovery timer constants mirror the module-private values in index.web.ts so
 // tests can advance fake timers past each one. Keep in sync with that file.
 export const DTLS_STALL_MS = 10_000;
 export const ACCEPTOR_GIVEUP_MS = 30_000;
@@ -207,7 +207,7 @@ export type Harness = {
 };
 
 /**
- * Install all browser globals webrtc.ts reads, plus window.app. Call before
+ * Install all browser globals index.web.ts reads. Call before
  * importing the module under test. Returns the captured-signal harness.
  */
 export function installGlobals(): Harness {

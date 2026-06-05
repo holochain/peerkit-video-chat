@@ -28,8 +28,10 @@ const config: RelayConfig = {
   logLevel: process.env.RELAY_LOG_LEVEL ?? "info",
   listenAddrs: [LISTEN_ADDR],
   // Accept every peer: this is a public rendezvous relay with no allow-list.
-  // An empty access token pairs with the always-true handler below.
-  networkAccessBytes: new Uint8Array(),
+  // The token is a single zero byte, not empty: an empty Uint8Array makes the
+  // handshake-response send a no-op, so initiators hang until their access
+  // handshake times out. The always-true handler below grants regardless.
+  networkAccessBytes: new Uint8Array([0]),
   networkAccessHandler: async () => true,
   // When set, the relay announces a /dns4/<host> multiaddr so peers dial the
   // public name instead of the bind address.

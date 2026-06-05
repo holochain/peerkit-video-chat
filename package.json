@@ -24,5 +24,10 @@
     "@types/node": "^24.13.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.8"
+  },
+  "comment:overrides": "Pin React Native + React to the Expo SDK 54 versions tree-wide. The mobile native modules (react-native-webrtc/permissions) and the file:-linked RN transport accept newer RN via broad peer ranges, so npm would otherwise hoist a newer react-native than Expo 54 (and its babel/codegen) supports, breaking the metro bundle.",
+  "overrides": {
+    "react-native": "0.81.5",
+    "react": "19.1.0"
   }
 }
