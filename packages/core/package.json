@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@peerkit/api": "^0.1.0-alpha.12",
-    "@peerkit/peerkit": "^0.1.0-alpha.12",
+    "@peerkit/peerkit": "^0.1.0-alpha.13",
     "cbor-x": "^1.6.0"
   }
 }

@@ -20,7 +20,7 @@
     "@libp2p/logger": "^6.2.8",
     "@logtape/logtape": "^2.1.2",
     "@peerkit/api": "^0.1.0-alpha.12",
-    "@peerkit/peerkit": "^0.1.0-alpha.12",
+    "@peerkit/peerkit": "^0.1.0-alpha.13",
     "electron-store": "^11.0.0"
   },
   "devDependencies": {
