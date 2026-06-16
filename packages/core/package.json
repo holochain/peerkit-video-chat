@@ -18,7 +18,7 @@
     "build": "tsc --build"
   },
   "dependencies": {
-    "@peerkit/api": "^0.1.0-alpha.12",
+    "@peerkit/api": "^0.1.0-alpha.13",
     "@peerkit/peerkit": "^0.1.0-alpha.12",
     "cbor-x": "^1.6.0"
   }
