@@ -17,8 +17,8 @@
     "package:win": "electron-builder --win"
   },
   "dependencies": {
-    "@libp2p/logger": "^6.2.8",
-    "@logtape/logtape": "^2.1.2",
+    "@libp2p/logger": "^6.2.9",
+    "@logtape/logtape": "^2.1.4",
     "@peerkit/api": "^0.1.0-alpha.12",
     "@peerkit/peerkit": "^0.1.0-alpha.12",
     "electron-store": "^11.0.0"
@@ -29,8 +29,8 @@
     "@fontsource/space-grotesk": "^5.2.10",
     "@peerkit-video-chat/core": "*",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "electron": "^42.3.3",
-    "electron-builder": "^26.15.2",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "svelte": "^5.56.3",
     "vite": "^7.3.3"
