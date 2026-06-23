@@ -25,9 +25,11 @@
     "typescript": "^6.0.2",
     "vitest": "^4.1.8"
   },
-  "comment:overrides": "Pin React Native + React to the Expo SDK 54 versions tree-wide. The mobile native modules (react-native-webrtc/permissions) and the file:-linked RN transport accept newer RN via broad peer ranges, so npm would otherwise hoist a newer react-native than Expo 54 (and its babel/codegen) supports, breaking the metro bundle.",
+  "comment:overrides": "Pin React Native + React to the Expo SDK 56 versions tree-wide. The mobile native modules (react-native-webrtc/permissions) and the published RN transport accept a range of RN via broad peer ranges, so npm would otherwise hoist a react-native that mismatches the Expo 56 / expo-dev-client codegen, breaking the metro bundle.",
+  "comment:overrides-vite": "Pin vite to a single 7.3.x copy. vitest ^4 (root) now resolves vite 8, while desktop targets vite 7; the two physical copies stop @sveltejs/vite-plugin-svelte from hooking into electron-vite's bundler, silently breaking .svelte transformation. Pinning dedupes to one vite 7 instance.",
   "overrides": {
-    "react-native": "0.81.5",
-    "react": "19.1.0"
+    "react-native": "0.85.3",
+    "react": "19.2.3",
+    "vite": "7.3.3"
   }
 }

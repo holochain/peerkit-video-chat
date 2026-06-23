@@ -1,6 +1,7 @@
-import { isIP } from "net";
+import { readFileSync } from "node:fs";
+import { isIP } from "node:net";
 
-import { run, type RelayConfig } from "@peerkit/relay";
+import { run, type RelayCertificate, type RelayConfig } from "@peerkit/relay";
 
 const RELAY_HOST = process.env.RELAY_HOST ?? "127.0.0.1";
 
@@ -17,7 +18,31 @@ if (ipVersion === 0) {
   process.exit(1);
 }
 
-const LISTEN_ADDR = `/ip${ipVersion}/${RELAY_HOST}/tcp/${parsedPort}/ws`;
+// The WebRTC Direct transport takes "host:port" listen addresses and builds the
+// /ip4|6/<host>/udp/<port>/webrtc-direct multiaddr itself. IPv6 needs brackets.
+const LISTEN_ADDR = ipVersion === 6 ? `[${RELAY_HOST}]:${parsedPort}` : `${RELAY_HOST}:${parsedPort}`;
+
+// Load a persisted WebRTC Direct certificate so the relay's certhash — and
+// therefore its dialable multiaddrs — stay stable across restarts. RELAY_CERT_PATH
+// points at a JSON file holding a RelayCertificate (see scripts/gen-cert.ts).
+// When unset, libp2p mints an ephemeral certificate and the certhash changes on
+// every restart, which breaks any peer that hardcoded the old certhash.
+const certPath = process.env.RELAY_CERT_PATH;
+let certificate: RelayCertificate | undefined;
+if (certPath !== undefined && certPath !== "") {
+  try {
+    certificate = JSON.parse(readFileSync(certPath, "utf8")) as RelayCertificate;
+  } catch (err) {
+    process.stderr.write(
+      `relay: failed to read RELAY_CERT_PATH "${certPath}": ${(err as Error).message}\n`,
+    );
+    process.exit(1);
+  }
+} else {
+  process.stderr.write(
+    "relay: RELAY_CERT_PATH unset — using an ephemeral certificate (certhash changes on restart)\n",
+  );
+}
 
 // Optional OTLP export — only enabled when an endpoint is configured, so local
 // dev stays dependency-free while deployed relays emit metrics.
@@ -33,9 +58,10 @@ const config: RelayConfig = {
   // handshake times out. The always-true handler below grants regardless.
   networkAccessBytes: new Uint8Array([0]),
   networkAccessHandler: async () => true,
-  // When set, the relay announces a /dns4/<host> multiaddr so peers dial the
-  // public name instead of the bind address.
-  publicHost: process.env.RELAY_PUBLIC_HOST,
+  // When set, the relay announces a /ip4|6/<publicIp> multiaddr so peers behind
+  // NAT dial the public address instead of the bind address.
+  publicIp: process.env.RELAY_PUBLIC_IP,
+  certificate,
   otel: otlpEndpoint
     ? { otlpEndpoint, serviceVersion: process.env.RELAY_VERSION ?? "unknown" }
     : undefined,

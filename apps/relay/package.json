@@ -11,7 +11,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@peerkit/relay": "^0.1.0-alpha.12"
+    "@peerkit/relay": "^0.1.0-alpha.14"
   },
   "devDependencies": {
     "tsx": "^4.22.4"

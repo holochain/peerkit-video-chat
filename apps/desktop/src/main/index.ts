@@ -18,6 +18,8 @@ import {
   type RoomStateView,
   type WebRtcSignal,
 } from "@peerkit-video-chat/core";
+
+import type { IAgentKeyStore } from "@peerkit/api";
 import {
   app,
   BrowserWindow,
@@ -39,6 +41,8 @@ interface StoreSchema {
   savedRooms: Array<{ name: string; lastUsed: number }>;
   theme: "system" | "light" | "dark";
   devices: { camera: string; microphone: string; speaker: string };
+  /** Hex-encoded Ed25519 private key for this node's stable agent identity. */
+  agentKey: string;
 }
 
 // Clean, stable app name for the userData directory and window title. NOTE:
@@ -52,6 +56,19 @@ interface StoreSchema {
 app.setName("peerkit-video-chat");
 
 const store = new Store<StoreSchema>();
+
+// Persists the node's Ed25519 private key in electron-store so the agent keeps a
+// stable identity across restarts. PeerKit generates and stores a fresh key on
+// first run when loadKey returns undefined.
+const agentKeyStore: IAgentKeyStore = {
+  loadKey: async (): Promise<Uint8Array | undefined> => {
+    const hex = store.get("agentKey");
+    return hex ? Uint8Array.from(Buffer.from(hex, "hex")) : undefined;
+  },
+  storeKey: async (privateKey: Uint8Array): Promise<void> => {
+    store.set("agentKey", Buffer.from(privateKey).toString("hex"));
+  },
+};
 
 let chat: ChatNode | undefined;
 let chatInit: Promise<ChatNode> | undefined;
@@ -72,10 +89,13 @@ function emit(channel: string, payload: unknown): void {
 }
 
 // Baked-in relay so packaged builds work out of the box. A DNS name (not a raw
-// IP) so it survives immutable droplet redeploys, which change the IP. Override
-// at runtime with PEERKIT_RELAY_ADDR (e.g. to point at a local dev relay).
+// IP) so it survives immutable droplet redeploys, which change the IP. The
+// WebRTC Direct certhash pins the relay's TLS certificate, so the deployed
+// relay must run with the matching persisted certificate (RELAY_CERT_PATH); an
+// ephemeral cert mints a new certhash on each restart and breaks this dial.
+// Override at runtime with PEERKIT_RELAY_ADDR (e.g. to point at a local dev relay).
 const DEFAULT_RELAY_ADDR =
-  "/dns4/peerkit-video-chat-demo.holochain.org/tcp/9000/ws";
+  "/dns4/peerkit-video-chat-demo.holochain.org/udp/9000/webrtc-direct/certhash/uEiBInMZ5cdtz-52Vkl4Lbc8OsU3haq5de4Zq9ZvS5l-uSA";
 
 function getRelayAddress(): string {
   const addr = process.env["PEERKIT_RELAY_ADDR"]?.trim();
@@ -135,6 +155,7 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
       chatInit = startChatNode({
         bootstrapRelays: [relayAddr],
         displayName,
+        agentKeyStore,
         events: {
           onState: (view: RoomStateView) => emit("chat:state", view),
           onChat: (incoming: IncomingChat) => emit("chat:chat", incoming),

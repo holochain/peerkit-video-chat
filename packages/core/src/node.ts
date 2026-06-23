@@ -1,4 +1,4 @@
-import type { AgentId, RelayAddress } from "@peerkit/api";
+import type { AgentId, IAgentKeyStore, RelayDialAddress } from "@peerkit/api";
 import type { WebRtcSignal } from "./envelope.js";
 import {
   PeerkitNodeBuilder,
@@ -52,8 +52,9 @@ export interface PeerStats {
 
 export interface ChatNodeOptions {
   id?: string;
-  bootstrapRelays: RelayAddress[];
+  bootstrapRelays: RelayDialAddress[];
   displayName: string;
+  agentKeyStore: IAgentKeyStore;
   events: RoomEvents;
   transportFactory?: PeerkitNodeTransportFactory;
   /** Called whenever the observed set of active network rooms changes. */
@@ -222,23 +223,21 @@ export async function startChatNode(
     if (dialPaused(agentId)) return; // TEMPORARY: see block above
     const info = node.agentStore.get(agentId);
     if (info === undefined) return;
-    for (const addr of info.addresses) {
-      try {
-        await node.transport.connect(addr);
-        if (node.isConnected(agentId)) return;
-      } catch (err) {
-        // TEMPORARY: pause dials to a peer the relay won't reserve for.
-        if (isNoReservation(err)) {
-          noReservationUntil.set(agentId, Date.now() + NO_RESERVATION_COOLDOWN_MS);
-          console.info(
-            `chat-node: ${peerLabel(agentId)} has no relay reservation — pausing dials for ${NO_RESERVATION_COOLDOWN_MS / 1000}s`,
-          );
-          return;
-        }
-        console.warn(
-          `chat-node: dial ${agentId.slice(0, 12)} via ${addr} failed: ${(err as Error).message}`,
+    try {
+      // connect() takes the peer's full address list and tries each itself.
+      await node.transport.connect(info.addresses);
+    } catch (err) {
+      // TEMPORARY: pause dials to a peer the relay won't reserve for.
+      if (isNoReservation(err)) {
+        noReservationUntil.set(agentId, Date.now() + NO_RESERVATION_COOLDOWN_MS);
+        console.info(
+          `chat-node: ${peerLabel(agentId)} has no relay reservation — pausing dials for ${NO_RESERVATION_COOLDOWN_MS / 1000}s`,
         );
+        return;
       }
+      console.warn(
+        `chat-node: dial ${agentId.slice(0, 12)} failed: ${(err as Error).message}`,
+      );
     }
   };
 
@@ -325,6 +324,7 @@ export async function startChatNode(
   }
 
   const builder = new PeerkitNodeBuilder({
+    agentKeyStore: options.agentKeyStore,
     networkAccessHandler: async () => true,
     messageHandler: async (fromAgent, data) => {
       const env = decode(data);
