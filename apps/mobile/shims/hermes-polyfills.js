@@ -72,14 +72,24 @@ if (typeof AbortSignal !== 'undefined') {
   if (typeof AbortSignal.any !== 'function') {
     AbortSignal.any = (signals) => {
       const controller = new AbortController();
+      const handlers = [];
+      const cleanup = () => {
+        for (const { signal, handler } of handlers) {
+          signal.removeEventListener('abort', handler);
+        }
+      };
       for (const signal of signals) {
         if (signal.aborted) {
           controller.abort(signal.reason);
-          break;
+          cleanup();
+          return controller.signal;
         }
-        signal.addEventListener('abort', () => controller.abort(signal.reason), {
-          once: true,
-        });
+        const handler = () => {
+          controller.abort(signal.reason);
+          cleanup();
+        };
+        handlers.push({ signal, handler });
+        signal.addEventListener('abort', handler, { once: true });
       }
       return controller.signal;
     };

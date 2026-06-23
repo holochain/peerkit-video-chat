@@ -6,14 +6,10 @@
   "type": "module",
   "exports": {
     ".": {
-      "react-native": {
-        "import": "./dist/index.rn.js",
-        "types": "./dist/index.d.ts"
-      },
-      "import": {
-        "import": "./dist/index.web.js",
-        "types": "./dist/index.d.ts"
-      }
+      "types": "./dist/index.d.ts",
+      "react-native": "./dist/index.rn.js",
+      "import": "./dist/index.web.js",
+      "default": "./dist/index.web.js"
     }
   },
   "scripts": {

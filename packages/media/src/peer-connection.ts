@@ -244,8 +244,8 @@ export class SharedMediaController implements MediaController {
         this.pendingCandidates.delete(fromAgentId);
         this.pendingEoc.delete(fromAgentId);
         this.videoSenders.delete(fromAgentId);
-        this.clearDtlsWatchdog(fromAgentId);
-        this.recovering.delete(fromAgentId);
+        this.offererPeers.delete(fromAgentId);
+        this.clearRecoveryState(fromAgentId);
       }
       this.logPeer(fromAgentId, "received offer — answering");
       const stream = await this.acquireLocalStream();
@@ -421,7 +421,9 @@ export class SharedMediaController implements MediaController {
       s.getAudioTracks().forEach((t) => stream.addTrack(t));
     } catch (err) {
       throw new Error(
-        err instanceof DOMException && err.name === "NotAllowedError"
+        typeof DOMException !== "undefined" &&
+        err instanceof DOMException &&
+        err.name === "NotAllowedError"
           ? "Microphone access denied. Grant microphone permission for this app and try again."
           : "Microphone unavailable. Check that it is not in use by another app.",
       );

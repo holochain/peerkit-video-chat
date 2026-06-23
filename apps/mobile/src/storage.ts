@@ -1,13 +1,25 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { IAgentKeyStore } from "@peerkit/api";
 import type { DeviceKind, StoredSettings, ThemePref } from "./types";
 
 const PREFIX = "pkvc:";
+
+const AGENT_KEY = `${PREFIX}agentKey`;
 
 const DEFAULT_DEVICES: Record<DeviceKind, string> = {
   camera: "",
   microphone: "",
   speaker: "",
 };
+
+function parseJsonOr<T>(raw: string | null | undefined, fallback: T): T {
+  if (raw == null) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
 
 export async function loadSettings(): Promise<StoredSettings> {
   const entries = await AsyncStorage.multiGet([
@@ -19,11 +31,11 @@ export async function loadSettings(): Promise<StoredSettings> {
   const values = Object.fromEntries(entries);
   return {
     username: values[`${PREFIX}username`] ?? undefined,
-    savedRooms: JSON.parse(values[`${PREFIX}savedRooms`] ?? "[]") as StoredSettings["savedRooms"],
+    savedRooms: parseJsonOr<StoredSettings["savedRooms"]>(values[`${PREFIX}savedRooms`], []),
     theme: (values[`${PREFIX}theme`] as ThemePref | null) ?? "system",
     devices: {
       ...DEFAULT_DEVICES,
-      ...(JSON.parse(values[`${PREFIX}devices`] ?? "{}") as Partial<Record<DeviceKind, string>>),
+      ...parseJsonOr<Partial<Record<DeviceKind, string>>>(values[`${PREFIX}devices`], {}),
     },
   };
 }
@@ -35,3 +47,33 @@ export async function setStoredValue(
   const encoded = typeof value === "string" ? value : JSON.stringify(value);
   await AsyncStorage.setItem(`${PREFIX}${key}`, encoded);
 }
+
+function toHex(bytes: Uint8Array): string {
+  let hex = "";
+  for (const byte of bytes) {
+    hex += byte.toString(16).padStart(2, "0");
+  }
+  return hex;
+}
+
+function fromHex(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+// Persists the node's Ed25519 private key in AsyncStorage so the agent keeps a
+// stable identity across restarts. PeerKit generates and stores a fresh key on
+// first run when loadKey returns undefined. Hermes has no Buffer, so the key is
+// hex-encoded by hand.
+export const agentKeyStore: IAgentKeyStore = {
+  loadKey: async (): Promise<Uint8Array | undefined> => {
+    const hex = await AsyncStorage.getItem(AGENT_KEY);
+    return hex ? fromHex(hex) : undefined;
+  },
+  storeKey: async (privateKey: Uint8Array): Promise<void> => {
+    await AsyncStorage.setItem(AGENT_KEY, toHex(privateKey));
+  },
+};

@@ -24,7 +24,11 @@
         "backgroundColor": "#101315"
       }
     },
-    "plugins": ["expo-dev-client", "@config-plugins/react-native-webrtc"],
+    "plugins": [
+      "expo-dev-client",
+      "@config-plugins/react-native-webrtc",
+      "./plugins/with-relay-cleartext.cjs"
+    ],
     "extra": {
       "relayMultiaddr": "/dns4/your-relay.example/tcp/443/wss",
       "iceServerUrls": ["stun:stun.cloudflare.com:3478"]

@@ -26,6 +26,7 @@ import {
   ipcMain,
   Menu,
   type MenuItemConstructorOptions,
+  safeStorage,
   session,
   shell,
   systemPreferences,
@@ -60,13 +61,75 @@ const store = new Store<StoreSchema>();
 // Persists the node's Ed25519 private key in electron-store so the agent keeps a
 // stable identity across restarts. PeerKit generates and stores a fresh key on
 // first run when loadKey returns undefined.
+const AGENT_KEY_ENC_PREFIX = "enc:v1:";
+
+// Thrown when an encrypted agent key exists but cannot be read right now (e.g. a
+// Linux keyring that is locked or transiently unavailable). loadKey throws this
+// instead of returning undefined so PeerKit ABORTS startup rather than minting a
+// fresh key and overwriting the existing blob via storeKey — a transient,
+// recoverable condition must not permanently destroy the stable identity.
+class AgentKeyUnreadableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "AgentKeyUnreadableError";
+  }
+}
+
 const agentKeyStore: IAgentKeyStore = {
   loadKey: async (): Promise<Uint8Array | undefined> => {
-    const hex = store.get("agentKey");
-    return hex ? Uint8Array.from(Buffer.from(hex, "hex")) : undefined;
+    const stored = store.get("agentKey");
+    if (!stored) return undefined;
+
+    if (stored.startsWith(AGENT_KEY_ENC_PREFIX)) {
+      // An encrypted blob exists. If we cannot decrypt it right now, do NOT
+      // return undefined — that path makes PeerKit regenerate and overwrite the
+      // blob, destroying the identity over a possibly transient keyring failure.
+      // Throw so startup aborts and the existing blob survives a retry.
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new AgentKeyUnreadableError(
+          "agent key is encrypted but safeStorage is unavailable; refusing to regenerate identity",
+        );
+      }
+      try {
+        const encrypted = Buffer.from(
+          stored.slice(AGENT_KEY_ENC_PREFIX.length),
+          "base64",
+        );
+        const hex = safeStorage.decryptString(encrypted);
+        return Uint8Array.from(Buffer.from(hex, "hex"));
+      } catch (err) {
+        throw new AgentKeyUnreadableError(
+          "failed to decrypt agent key; refusing to regenerate identity",
+          { cause: err },
+        );
+      }
+    }
+
+    // Legacy plaintext hex from before at-rest encryption. Decode it and
+    // re-store encrypted so the plaintext copy gets overwritten.
+    const key = Uint8Array.from(Buffer.from(stored, "hex"));
+    if (safeStorage.isEncryptionAvailable()) {
+      void agentKeyStore.storeKey(key);
+    }
+    return key;
   },
   storeKey: async (privateKey: Uint8Array): Promise<void> => {
-    store.set("agentKey", Buffer.from(privateKey).toString("hex"));
+    const hex = Buffer.from(privateKey).toString("hex");
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(hex);
+      store.set(
+        "agentKey",
+        AGENT_KEY_ENC_PREFIX + encrypted.toString("base64"),
+      );
+      return;
+    }
+    // No safeStorage backend (e.g. a headless Linux box with no keyring). Fall
+    // back to plaintext so the agent keeps a stable identity; no more exposed
+    // than before this change.
+    console.warn(
+      "main: safeStorage unavailable; storing agent key unencrypted",
+    );
+    store.set("agentKey", hex);
   },
 };
 
@@ -95,7 +158,7 @@ function emit(channel: string, payload: unknown): void {
 // ephemeral cert mints a new certhash on each restart and breaks this dial.
 // Override at runtime with PEERKIT_RELAY_ADDR (e.g. to point at a local dev relay).
 const DEFAULT_RELAY_ADDR =
-  "/dns4/peerkit-video-chat-demo.holochain.org/udp/9000/webrtc-direct/certhash/uEiBInMZ5cdtz-52Vkl4Lbc8OsU3haq5de4Zq9ZvS5l-uSA";
+  "/dns4/peerkit-video-chat-demo.holochain.org/udp/9000/webrtc-direct/certhash/uEiBItrdDAL56R0V_igeoxvI_vkP5i2YosW62uJl-GffANg";
 
 function getRelayAddress(): string {
   const addr = process.env["PEERKIT_RELAY_ADDR"]?.trim();
@@ -173,7 +236,22 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
         },
       });
     }
-    chat = await chatInit;
+    try {
+      chat = await chatInit;
+    } catch (err) {
+      // Clear the in-flight promise so a retry can start a fresh node instead of
+      // re-awaiting this same rejected promise forever. Matters most for
+      // AgentKeyUnreadableError (locked keyring): the user can unlock and click
+      // Continue again rather than being stuck until restart.
+      chatInit = undefined;
+      if (err instanceof AgentKeyUnreadableError) {
+        throw new Error(
+          "Your saved identity is locked and could not be read. Unlock your system keyring (or login keychain) and try again.",
+          { cause: err },
+        );
+      }
+      throw err;
+    }
   }
   // Reports live room state too, so a renderer that reloaded mid-call (e.g. on
   // laptop wake) routes straight back into the call instead of the lobby (where
@@ -236,9 +314,7 @@ async function openLogsFolder(): Promise<void> {
 function buildMenu(): void {
   const isMac = process.platform === "darwin";
   const template: MenuItemConstructorOptions[] = [
-    ...(isMac
-      ? [{ role: "appMenu" as const }]
-      : []),
+    ...(isMac ? [{ role: "appMenu" as const }] : []),
     { role: "fileMenu" },
     { role: "editMenu" },
     { role: "viewMenu" },

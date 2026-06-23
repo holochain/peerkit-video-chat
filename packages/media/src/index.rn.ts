@@ -69,21 +69,27 @@ class StatsSpeakingDetector implements SpeakingDetector {
     this.notify.set(agentId, onChange);
     let smoothedLevel = 0;
     const timer = setInterval(() => {
-      void getStats().then((stats: RTCStatsReport) => {
-        let level = 0;
-        stats.forEach((report: RTCStats) => {
-          const maybeLevel = (report as RTCStats & { audioLevel?: number }).audioLevel;
-          if (typeof maybeLevel === "number") {
-            level = Math.max(level, maybeLevel);
+      void getStats()
+        .then((stats: RTCStatsReport) => {
+          // Drop late-resolving polls from an already-stopped/restarted timer.
+          if (this.timers.get(agentId) !== timer) return;
+          let level = 0;
+          stats.forEach((report: RTCStats) => {
+            const maybeLevel = (report as RTCStats & { audioLevel?: number }).audioLevel;
+            if (typeof maybeLevel === "number") {
+              level = Math.max(level, maybeLevel);
+            }
+          });
+          smoothedLevel = smoothedLevel * 0.85 + level * 0.15;
+          const speaking = smoothedLevel > SPEAKING_THRESHOLD;
+          if (this.state.get(agentId) !== speaking) {
+            this.state.set(agentId, speaking);
+            this.notify.get(agentId)?.(speaking);
           }
+        })
+        .catch(() => {
+          // Keep the polling loop alive; ignore transient getStats() failures.
         });
-        smoothedLevel = smoothedLevel * 0.85 + level * 0.15;
-        const speaking = smoothedLevel > SPEAKING_THRESHOLD;
-        if (this.state.get(agentId) !== speaking) {
-          this.state.set(agentId, speaking);
-          onChange(speaking);
-        }
-      });
     }, STATS_INTERVAL_MS);
     this.timers.set(agentId, timer);
   }

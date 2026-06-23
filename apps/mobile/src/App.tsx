@@ -144,6 +144,10 @@ export default function App(): JSX.Element {
       knownPeers.current.clear();
       return;
     }
+    const currentIds = new Set(roomMembers.map((member) => member.agentId));
+    for (const agentId of Array.from(knownPeers.current)) {
+      if (!currentIds.has(agentId)) knownPeers.current.delete(agentId);
+    }
     for (const member of roomMembers) {
       if (member.agentId === chat.state.agentId || knownPeers.current.has(member.agentId)) continue;
       knownPeers.current.add(member.agentId);

@@ -42,10 +42,18 @@ export function PreJoinScreen({
   const [stream, setStream] = useState<MediaStreamLike | null>(null);
 
   useEffect(() => {
+    let active = true;
     media
       .initLocalMedia(selfAgentId)
-      .then(setStream)
-      .catch(onError);
+      .then((localStream) => {
+        if (active) setStream(localStream);
+      })
+      .catch((error: unknown) => {
+        if (active) onError(error);
+      });
+    return () => {
+      active = false;
+    };
   }, [media, onError, selfAgentId]);
 
   const url = selfCam ? streamUrl(stream) : null;

@@ -22,7 +22,7 @@ export function SettingsSheet({
 }: SettingsSheetProps): JSX.Element {
   const styles = useThemedStyles(makeStyles);
   return (
-    <Modal animationType="slide" transparent visible={visible}>
+    <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
       <View style={styles.scrim}>
         <View style={styles.sheet}>
           <View style={styles.head}>

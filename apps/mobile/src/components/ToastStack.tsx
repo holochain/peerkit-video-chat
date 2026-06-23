@@ -17,7 +17,11 @@ export function ToastStack({ toasts, onDismiss }: ToastStackProps): JSX.Element 
         <Pressable
           key={toast.id}
           onPress={() => onDismiss(toast.id)}
-          style={[styles.toast, toast.kind === "warn" && styles.warn]}
+          style={[
+            styles.toast,
+            toast.kind === "warn" ? styles.warn : null,
+            toast.kind === "info" ? styles.info : null,
+          ]}
         >
           <Text style={styles.message}>{toast.message}</Text>
         </Pressable>
@@ -44,6 +48,10 @@ const makeStyles = (t: Palette) => StyleSheet.create({
   warn: {
     backgroundColor: t.warnSurface,
     borderColor: t.warnBorder,
+  },
+  info: {
+    backgroundColor: t.accentSurface,
+    borderColor: t.borderAccent,
   },
   message: {
     color: t.toastText,

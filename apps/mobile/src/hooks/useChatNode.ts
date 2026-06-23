@@ -8,6 +8,7 @@ import {
 import { createNode as createReactNativeNode } from "@peerkit/transport-libp2p-react-native";
 import { useCallback, useRef, useState } from "react";
 import { configuredIceServerUrls, configuredRelayMultiaddr } from "../config";
+import { agentKeyStore } from "../storage";
 import type { ChatState } from "../types";
 
 const INITIAL_CHAT_STATE: ChatState = {
@@ -71,6 +72,7 @@ export function useChatNode(): UseChatNodeResult {
         const node = await startChatNode({
           bootstrapRelays: [relay],
           displayName,
+          agentKeyStore,
           events: {
             onState: (room) => {
               setState((prev) => ({ ...prev, room }));
@@ -99,6 +101,9 @@ export function useChatNode(): UseChatNodeResult {
               }));
             },
             onSignal,
+            // Remote camera on/off is not yet surfaced in the mobile call UI;
+            // accept the event so the room contract is satisfied.
+            onMediaState: () => {},
           },
           onNetworkRooms: (networkRooms) => {
             setState((prev) => ({ ...prev, networkRooms }));
@@ -115,9 +120,11 @@ export function useChatNode(): UseChatNodeResult {
               iceServerUrls: configuredIceServerUrls(),
               // libp2p's React Native gater otherwise refuses to dial the
               // cleartext demo relay (insecure `/ws`) and LAN peers (private
-              // addresses). Permit both for development. A production `wss`
-              // deployment should drop this and keep the secure default.
-              connectionGater: { denyDialMultiaddr: async () => false },
+              // addresses). Permit both for development only. A production `wss`
+              // deployment keeps the secure default gater.
+              ...(__DEV__
+                ? { connectionGater: { denyDialMultiaddr: async () => false } }
+                : {}),
             }),
         });
         nodeRef.current = node;

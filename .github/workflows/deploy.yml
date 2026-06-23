@@ -3,11 +3,21 @@ name: Deploy relay + TURN
 # Manually triggered. Provisions a fresh DigitalOcean droplet from
 # infra/cloud-init.yaml (relay + coturn, plain), then from CI: upserts the
 # Cloudflare DNS record to the droplet IP, issues a Let's Encrypt cert via
-# DNS-01, and delivers it over SSH to enable coturn TLS.
+# DNS-01, delivers it over SSH to enable coturn TLS, and delivers the persisted
+# relay WebRTC Direct certificate (RELAY_CERT_JSON secret) so the relay's
+# certhash stays stable across droplets. The certhash is printed in the run
+# summary — bake it into client dial multiaddrs.
 #
-# Immutable model: each run creates a NEW droplet. The Cloudflare token and the
-# TLS private key never touch the droplet. Because of that there is no on-box
-# cert renewal — the 90-day cert is refreshed by re-running this workflow.
+# The relay cert is generated once, locally, with apps/relay/scripts/gen-cert.ts
+# (npm -w @peerkit-video-chat/relay run gen-cert) and the resulting
+# relay-cert.json is stored verbatim as the RELAY_CERT_JSON secret. It is NOT
+# regenerated per deploy, so the certhash never changes. The cert is valid for
+# 5 years — re-mint it and update the secret before it expires.
+#
+# Immutable model: each run creates a NEW droplet. The Cloudflare token, the TLS
+# private key and the relay cert private key never touch cloud-init user-data
+# (all delivered over SSH). Because of that there is no on-box cert renewal —
+# the 90-day TLS cert is refreshed by re-running this workflow.
 # The old droplet is left running so a bad deploy can be rolled back by
 # pointing DNS back at it; delete it manually after verifying.
 on:
@@ -133,13 +143,15 @@ jobs:
             --config-dir "$PWD/le" --work-dir "$PWD/le-work" --logs-dir "$PWD/le-logs"
           rm -f cf.ini
 
-      # Wait for cloud-init to finish (coturn installed), copy the cert to a
-      # turnserver-readable path, append the TLS listeners, restart coturn.
-      - name: Deliver cert and enable TLS
+      # Wait for cloud-init to finish (coturn + relay installed), copy the TLS
+      # cert to a turnserver-readable path and enable the TLS listeners, then
+      # deliver the persisted relay cert and point the relay at it.
+      - name: Deliver certs and enable TLS
         env:
           SSH_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
           IP: ${{ steps.create.outputs.droplet_ip }}
           NAME: ${{ env.REALM }}
+          RELAY_CERT_JSON: ${{ secrets.RELAY_CERT_JSON }}
         run: |
           # Trailing newline is required — OpenSSH rejects a key file without
           # one ("error in libcrypto"). Validate it parses before using it.
@@ -176,7 +188,23 @@ jobs:
                   rm -f /tmp/fullchain.pem /tmp/privkey.pem
                   grep -q "^tls-listening-port" /etc/turnserver.conf || printf "\ntls-listening-port=5349\nalt-tls-listening-port=443\ncert=/etc/coturn/certs/fullchain.pem\npkey=/etc/coturn/certs/privkey.pem\n" >> /etc/turnserver.conf
                   systemctl restart coturn'
-          rm -f key
+          # Deliver the persisted relay WebRTC Direct certificate over SSH (key
+          # never lands in cloud-init user-data) and point the relay at it. The
+          # relay booted with an ephemeral cert; restarting after delivery makes
+          # it adopt the stable certhash. Path is relative to the unit's
+          # WorkingDirectory (/opt/peerkit-video-chat).
+          umask 077
+          printf '%s' "$RELAY_CERT_JSON" > relay-cert.json
+          if ! jq -e . relay-cert.json >/dev/null 2>&1; then
+            echo "::error::RELAY_CERT_JSON is not valid JSON"; exit 1
+          fi
+          scp $ssh_opts relay-cert.json "root@${IP}:/tmp/relay-cert.json"
+          remote 'install -d -o peerkit -g peerkit -m 0750 /opt/peerkit-video-chat/certs
+                  install -o peerkit -g peerkit -m 0640 /tmp/relay-cert.json /opt/peerkit-video-chat/certs/relay-cert.json
+                  rm -f /tmp/relay-cert.json
+                  grep -q "^RELAY_CERT_PATH=" /etc/peerkit-relay.env || echo "RELAY_CERT_PATH=certs/relay-cert.json" >> /etc/peerkit-relay.env
+                  systemctl restart peerkit-relay'
+          rm -f relay-cert.json key
 
       # Cut DNS over only now that the new droplet serves TURN + working TLS.
       # DNS-only (grey cloud) A record — Cloudflare's proxy can't carry TURN UDP.
@@ -206,12 +234,16 @@ jobs:
           IP: ${{ steps.create.outputs.droplet_ip }}
           ID: ${{ steps.create.outputs.droplet_id }}
           SHA: ${{ steps.create.outputs.commit_sha }}
+          RELAY_CERT_JSON: ${{ secrets.RELAY_CERT_JSON }}
         run: |
+          certhash=$(jq -r '.certhash' <<<"$RELAY_CERT_JSON")
           {
             echo "Deployed droplet **$ID** ($IP) from commit \`$SHA\`."
             echo "Tagged: \`peerkit\`, \`commit:$SHA\`. DO monitoring agent enabled."
             echo "DNS $REALM updated; coturn TLS enabled on 5349/443."
             echo ""
+            echo "Relay certhash: \`$certhash\` — bake into client dial multiaddrs."
+            echo ""
             echo "Old droplet (if any) was left running; delete it manually after verifying."
-            echo "Cert is 90 days with no on-box renewal — re-run this workflow to refresh."
+            echo "TLS cert is 90 days with no on-box renewal — re-run this workflow to refresh."
           } >> "$GITHUB_STEP_SUMMARY"

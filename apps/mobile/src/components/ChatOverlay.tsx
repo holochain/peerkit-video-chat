@@ -76,7 +76,7 @@ export function ChatOverlay({
           return (
             <View style={[styles.message, self && styles.selfMessage]}>
               <View style={styles.messageHead}>
-                <View style={[styles.dot, { backgroundColor: peerColorFromId(item.displayName) }]} />
+                <View style={[styles.dot, { backgroundColor: peerColorFromId(item.agentId) }]} />
                 <Text style={styles.sender}>{item.displayName}</Text>
                 <Text style={styles.short}>{shortId(item.agentId)}</Text>
               </View>

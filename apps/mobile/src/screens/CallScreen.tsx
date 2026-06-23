@@ -129,6 +129,8 @@ export function CallScreen({
 
       <View style={styles.controls}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={selfMic ? "Mute microphone" : "Unmute microphone"}
           onPress={onToggleMic}
           style={[styles.control, selfMic ? styles.controlOn : styles.controlOff]}
         >
@@ -139,6 +141,8 @@ export function CallScreen({
           />
         </Pressable>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={selfCam ? "Turn camera off" : "Turn camera on"}
           onPress={onToggleCam}
           style={[styles.control, selfCam ? styles.controlOn : styles.controlOff]}
         >
@@ -148,7 +152,12 @@ export function CallScreen({
             size={22}
           />
         </Pressable>
-        <Pressable onPress={() => setChatOpen(true)} style={styles.control}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open room chat"
+          onPress={() => setChatOpen(true)}
+          style={styles.control}
+        >
           <Feather color={t.textBright} name="message-square" size={22} />
           {messages.length > 0 ? (
             <View style={styles.badge}>
@@ -156,7 +165,12 @@ export function CallScreen({
             </View>
           ) : null}
         </Pressable>
-        <Pressable onPress={onLeave} style={[styles.control, styles.leave]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Leave call"
+          onPress={onLeave}
+          style={[styles.control, styles.leave]}
+        >
           <Feather color={t.dangerText} name="phone-off" size={22} />
         </Pressable>
       </View>

@@ -19,7 +19,10 @@ export function configuredRelayMultiaddr(): string {
 }
 
 export function configuredIceServerUrls(): string[] {
-  return expoExtra().iceServerUrls ?? ["stun:stun.cloudflare.com:3478"];
+  const urls = (expoExtra().iceServerUrls ?? [])
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0);
+  return urls.length > 0 ? urls : ["stun:stun.cloudflare.com:3478"];
 }
 
 export function configuredIceServers(): RTCIceServer[] {
