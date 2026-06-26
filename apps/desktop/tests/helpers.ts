@@ -1,20 +1,22 @@
 /**
- * Test harness for the renderer WebRTC layer.
+ * Test harness for the shared WebRTC media controller.
  *
- * webrtc.ts is browser code with no DOM in the vitest (node) env and keeps its
+ * The browser media implementation has no DOM in the vitest (node) env and keeps its
  * recovery logic in module-private functions. So the suite drives it black-box —
  * through the exported initiateCall / handleSignal / closePeer surface — against
  * a hand-rolled RTCPeerConnection mock whose state transitions the test fires by
- * hand, asserting on the signals emitted via window.app.sendSignal.
+ * hand, asserting on the injected sendSignal callback.
  */
 
 import { vi } from "vitest";
 
-// Recovery timer constants — mirror the (module-private) values in webrtc.ts so
-// tests can advance fake timers past each one. Keep in sync with that file.
-export const DTLS_STALL_MS = 10_000;
-export const ACCEPTOR_GIVEUP_MS = 30_000;
-export const RECOVERY_ATTEMPT_MS = 12_000;
+// Recovery timer constants re-exported from the shared controller so the suite
+// advances fake timers against the real ladder and cannot drift from it.
+export {
+  ACCEPTOR_GIVEUP_MS,
+  DTLS_STALL_MS,
+  RECOVERY_ATTEMPT_MS,
+} from "../src/renderer/src/webrtc/peer-connection.js";
 
 /** Every mock peer connection constructed since the last reset, in order. */
 export const createdPeers: MockPeerConnection[] = [];
@@ -73,6 +75,12 @@ export class MockPeerConnection {
   signalingState: RTCSignalingState = "stable";
   currentRemoteDescription: { type: string; sdp: string } | null = null;
   localDescription: { type: string; sdp: string } | null = null;
+
+  // Real RTCPeerConnection exposes remoteDescription (current or pending). The
+  // controller reads it to decide whether to buffer ICE; mirror currentRemoteDescription.
+  get remoteDescription(): { type: string; sdp: string } | null {
+    return this.currentRemoteDescription;
+  }
 
   onicecandidate: Handler = null;
   ontrack: Handler = null;
@@ -207,7 +215,7 @@ export type Harness = {
 };
 
 /**
- * Install all browser globals webrtc.ts reads, plus window.app. Call before
+ * Install all browser globals webrtc/index.ts reads. Call before
  * importing the module under test. Returns the captured-signal harness.
  */
 export function installGlobals(): Harness {
