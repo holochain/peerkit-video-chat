@@ -26,3 +26,4 @@ export type {
   PeerInfo,
   PeerStats,
 } from "./node.js";
+export type { PeerkitNodeTransportFactory } from "@peerkit/peerkit";

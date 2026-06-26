@@ -8,12 +8,16 @@
   "scripts": {
     "build": "tsc --build",
     "dev": "tsx watch src/index.ts",
+    "gen-cert": "tsx scripts/gen-cert.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@peerkit/relay": "^0.1.0-alpha.12"
+    "@peerkit/relay": "^0.1.0-alpha.14"
   },
   "devDependencies": {
+    "@peculiar/x509": "^2.0.0",
+    "multiformats": "^13.4.2",
+    "reflect-metadata": "^0.2.2",
     "tsx": "^4.22.4"
   }
 }

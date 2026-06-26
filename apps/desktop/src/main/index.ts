@@ -18,6 +18,7 @@ import {
   type RoomStateView,
   type WebRtcSignal,
 } from "@peerkit-video-chat/core";
+import { FileAgentKeyStore } from "@peerkit/peerkit/node";
 import {
   app,
   BrowserWindow,
@@ -28,7 +29,7 @@ import {
   shell,
   systemPreferences,
 } from "electron";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -132,9 +133,15 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
     // promise so overlapping calls await the same node.
     if (chatInit === undefined) {
       relayAddr = getRelayAddress();
+      // Persist the agent key under userData so the node keeps a stable
+      // identity across restarts (FileAgentKeyStore writes it 0600).
+      const agentKeyStore = new FileAgentKeyStore(
+        join(app.getPath("userData"), "agent.key"),
+      );
       chatInit = startChatNode({
         bootstrapRelays: [relayAddr],
         displayName,
+        agentKeyStore,
         events: {
           onState: (view: RoomStateView) => emit("chat:state", view),
           onChat: (incoming: IncomingChat) => emit("chat:chat", incoming),
