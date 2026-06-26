@@ -1,6 +1,6 @@
 <script lang="ts">
   import AvatarMini from '../components/AvatarMini.svelte';
-  import { initLocalMedia } from '../webrtc.js';
+  import { initLocalMedia } from '../media.js';
 
   interface RoomMember {
     agentId: string;

@@ -17,7 +17,7 @@
     closeAll,
     setPeerNameResolver,
     getLocalStream,
-  } from './webrtc.js';
+  } from './media.js';
   import { remoteStreams, speakingPeers, remoteVideoLive } from './lib/stores.js';
   import type { PeerStats } from '@peerkit-video-chat/core';
   import {

@@ -1,14 +1,14 @@
 /**
- * Recovery-ladder tests for the renderer WebRTC layer (webrtc.ts).
+ * Recovery-ladder tests for the shared WebRTC media controller.
  *
  * Drives the module black-box: initiateCall / handleSignal / closePeer against a
  * MockPeerConnection, firing lifecycle transitions by hand and asserting on the
- * signals emitted via window.app.sendSignal. Fake timers exercise the DTLS
+ * signals emitted via the injected sendSignal callback. Fake timers exercise the DTLS
  * watchdog, the per-attempt recovery timeout, and the acceptor give-up timer.
  *
  * Globals and the module are (re)installed per test so module-level recovery
- * state never leaks between cases. TURN is configured via the __TURN_*__ build
- * constants (see vitest.config.ts `define`) so the relay-only rung is active.
+ * state never leaks between cases. TURN is configured through the controller
+ * dependencies so the relay-only rung is active.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,13 +33,15 @@ const SELF = "agent-self";
 const PEER = "agent-zzz";
 
 let h: Harness;
-// Re-imported per test so module state (peers, recovery maps) starts clean.
-let webrtc: typeof import("../src/renderer/src/webrtc");
+// Re-imported per test so the binding picks up freshly-installed globals.
+let webrtc: typeof import("../src/renderer/src/webrtc/index");
+// A fresh controller instance per test → recovery state never leaks between cases.
+let ctrl: import("../src/renderer/src/webrtc/types.js").MediaController;
 
 /** Bring a freshly-initiated offerer connection up to fully connected. */
 async function connect(pc: MockPeerConnection): Promise<void> {
   // Answer the initial offer, then walk the transports to connected.
-  await webrtc.handleSignal(PEER, {
+  await ctrl.handleSignal(PEER, {
     kind: "answer",
     sdp: sdpWithFingerprint("FP_REMOTE_0"),
   });
@@ -76,29 +78,54 @@ beforeEach(async () => {
   resetPeers();
   h = installGlobals();
   vi.resetModules();
-  webrtc = await import("../src/renderer/src/webrtc");
+  webrtc = await import("../src/renderer/src/webrtc/index");
+  ctrl = webrtc.createMediaController({
+    sendSignal: h.sendSignal,
+    requestMediaAccess: async () => ({ camera: true, microphone: true }),
+    iceServers: [
+      { urls: "stun:stun.cloudflare.com:3478" },
+      {
+        urls: [
+          "turn:turn.example.test:3478?transport=udp",
+          "turns:turn.example.test:443?transport=tcp",
+        ],
+        username: "test",
+        credential: "test",
+      },
+    ],
+  });
 });
 
 afterEach(() => {
-  webrtc.closeAll();
+  ctrl.closeAll();
   vi.clearAllTimers();
   vi.useRealTimers();
 });
 
 describe("offer/answer setup", () => {
   it("initiateCall sends an offer and marks us the offerer", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
 
     expect(createdPeers).toHaveLength(1);
     const offers = offersTo().filter((s) => s.kind === "offer");
     expect(offers).toHaveLength(1);
   });
+
+  it("methods work when destructured off the controller (desktop usage)", async () => {
+    // The desktop renderer does `const { initiateCall, closeAll } = controller`
+    // and calls them free-standing — methods must keep their `this` binding.
+    const { initiateCall, closeAll } = ctrl;
+    await initiateCall(PEER);
+    await flush();
+    expect(createdPeers).toHaveLength(1);
+    expect(() => closeAll()).not.toThrow();
+  });
 });
 
 describe("ICE-restart rung", () => {
   it("restarts ICE on the same pc when the connection fails", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
@@ -113,7 +140,7 @@ describe("ICE-restart rung", () => {
   });
 
   it("restarts up to 3 times before escalating to a full reconnect", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
@@ -135,7 +162,7 @@ describe("ICE-restart rung", () => {
 
 describe("full-reconnect rung", () => {
   it("builds a fresh pc once ICE restarts are exhausted", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const first = createdPeers[0]!;
     await connect(first);
@@ -156,7 +183,7 @@ describe("full-reconnect rung", () => {
   });
 
   it("forces relay-only on the second full reconnect", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const first = createdPeers[0]!;
     await connect(first);
@@ -176,7 +203,7 @@ describe("full-reconnect rung", () => {
   });
 
   it("closes the peer after the ladder is exhausted", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const first = createdPeers[0]!;
     await connect(first);
@@ -193,10 +220,10 @@ describe("full-reconnect rung", () => {
 
 describe("DTLS-stall watchdog", () => {
   it("recovers immediately when DTLS fails (fail-fast)", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -209,10 +236,10 @@ describe("DTLS-stall watchdog", () => {
   });
 
   it("recovers when DTLS hangs past the backstop timer", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -227,7 +254,7 @@ describe("DTLS-stall watchdog", () => {
   });
 
   it("does not recover when DTLS completes before the backstop", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc); // reaches connected, clearing the watchdog
@@ -242,7 +269,7 @@ describe("DTLS-stall watchdog", () => {
 
 describe("per-attempt recovery timeout (offerer wedge guard)", () => {
   it("advances the ladder when a restart answer never arrives", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
@@ -262,11 +289,11 @@ describe("per-attempt recovery timeout (offerer wedge guard)", () => {
 
 describe("recovery-offer routing by DTLS fingerprint", () => {
   it("applies a same-fingerprint offer to the existing pc (ICE restart)", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     // Accept the peer's answer carrying their fingerprint.
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -278,7 +305,7 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
     // Remote sends a recovery offer with the SAME fingerprint = ICE restart.
     pc._setConn("failed"); // allow mid-call offer
     await flush();
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "offer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -290,10 +317,10 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
   });
 
   it("rebuilds on a new-fingerprint offer (remote reload)", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "answer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -305,7 +332,7 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
     pc._setConn("failed");
     await flush();
     // DIFFERENT fingerprint = remote rebuilt. Stale pc discarded, fresh accepts.
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "offer",
       sdp: sdpWithFingerprint("FP_REMOTE_NEW"),
     });
@@ -321,7 +348,7 @@ describe("recovery-offer routing by DTLS fingerprint", () => {
 describe("acceptor give-up", () => {
   it("reaps the connection when no recovery offer arrives in time", async () => {
     // We are the acceptor: the peer initiates by sending us an offer.
-    await webrtc.handleSignal(PEER, {
+    await ctrl.handleSignal(PEER, {
       kind: "offer",
       sdp: sdpWithFingerprint("FP_REMOTE_0"),
     });
@@ -345,14 +372,14 @@ describe("acceptor give-up", () => {
 
 describe("cleanup", () => {
   it("closePeer cancels timers so no recovery fires afterwards", async () => {
-    await webrtc.initiateCall(PEER);
+    await ctrl.initiateCall(PEER);
     await flush();
     const pc = createdPeers[0]!;
     await connect(pc);
 
     pc._setConn("failed"); // arms the per-attempt timeout
     await flush();
-    webrtc.closePeer(PEER);
+    ctrl.closePeer(PEER);
     const peersAfterClose = createdPeers.length;
 
     await vi.advanceTimersByTimeAsync(RECOVERY_ATTEMPT_MS + DTLS_STALL_MS + 10);
@@ -360,5 +387,76 @@ describe("cleanup", () => {
 
     // No further pcs built, no further offers emitted post-close.
     expect(createdPeers.length).toBe(peersAfterClose);
+  });
+});
+
+describe("microphone mute intent", () => {
+  it("applies a pre-acquisition mute to the acquired audio track", async () => {
+    // Muted before any media exists (e.g. on the pre-join screen). initiateCall
+    // acquires local media without starting the self speaking detector.
+    ctrl.setMuted(true);
+
+    await ctrl.initiateCall(PEER);
+    await flush();
+
+    const stream = ctrl.getLocalStream();
+    expect(stream).not.toBeNull();
+    const audio = stream!.getAudioTracks();
+    expect(audio.length).toBeGreaterThan(0);
+    expect(audio.every((t) => !t.enabled)).toBe(true);
+  });
+});
+
+describe("setup failure cleanup", () => {
+  it("tears down the peer when initiateCall fails, so a retry can rebuild", async () => {
+    h.sendSignal.mockRejectedValueOnce(new Error("signal channel down"));
+
+    await expect(ctrl.initiateCall(PEER)).rejects.toThrow("signal channel down");
+    await flush();
+    expect(createdPeers[0]!.close).toHaveBeenCalled();
+
+    // The failed peer was removed, so the guard no longer short-circuits the retry.
+    await ctrl.initiateCall(PEER);
+    await flush();
+    expect(createdPeers).toHaveLength(2);
+  });
+});
+
+describe("recovery ICE generation gating", () => {
+  it("buffers acceptor recovery candidates until the new remote description arrives", async () => {
+    // We are the acceptor: the peer initiates by sending us an offer.
+    await ctrl.handleSignal(PEER, {
+      kind: "offer",
+      sdp: sdpWithFingerprint("FP_REMOTE_0"),
+    });
+    await flush();
+    const pc = createdPeers[0]!;
+    pc._setIce("connected");
+    pc._setDtls("connected");
+    pc._setConn("connected");
+    await flush();
+
+    // Connection fails; the acceptor cannot drive recovery, so it waits for the
+    // offerer's recovery offer while the dead session's remote description lingers.
+    pc._setConn("failed");
+    await flush();
+    const addsBeforeOffer = pc.addIceCandidate.mock.calls.length;
+
+    // A recovery ICE candidate races ahead of the recovery offer. It belongs to
+    // the new generation and must be buffered, not applied to the dead description.
+    await ctrl.handleSignal(PEER, {
+      kind: "ice",
+      candidate: JSON.stringify({ candidate: "x", sdpMid: "0", sdpMLineIndex: 0 }),
+    });
+    expect(pc.addIceCandidate.mock.calls.length).toBe(addsBeforeOffer);
+
+    // The same-fingerprint recovery offer lands → ICE restart on the same pc,
+    // which sets the new remote description and drains the buffered candidate.
+    await ctrl.handleSignal(PEER, {
+      kind: "offer",
+      sdp: sdpWithFingerprint("FP_REMOTE_0"),
+    });
+    await flush();
+    expect(pc.addIceCandidate.mock.calls.length).toBeGreaterThan(addsBeforeOffer);
   });
 });

@@ -8,5 +8,7 @@
   },
   "include": ["src/**/*"],
   "exclude": ["src/renderer/**/*"],
-  "references": [{ "path": "../../packages/core" }]
+  "references": [
+    { "path": "../../packages/core" }
+  ]
 }
