@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "PeerKit Video Chat",
+    "slug": "peerkit-video-chat",
+    "scheme": "peerkit-video-chat",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Camera access is used for video calls.",
+        "NSMicrophoneUsageDescription": "Microphone access is used for voice calls."
+      }
+    },
+    "android": {
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#101315"
+      }
+    },
+    "plugins": [
+      "expo-dev-client",
+      "@config-plugins/react-native-webrtc"
+    ],
+    "extra": {
+      "relayMultiaddr": "/ip4/164.90.201.18/udp/9000/webrtc-direct/certhash/uEiBItrdDAL56R0V_igeoxvI_vkP5i2YosW62uJl-GffANg",
+      "iceServerUrls": ["stun:stun.cloudflare.com:3478"]
+    }
+  }
+}
