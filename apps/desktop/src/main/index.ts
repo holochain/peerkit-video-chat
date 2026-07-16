@@ -6,6 +6,10 @@ import {
   getLogDir,
   initLogging,
 } from "./logging.js";
+import {
+  parseStartupOptions,
+  type DesktopStartupOptions,
+} from "./startup.js";
 
 import Store from "electron-store";
 
@@ -55,6 +59,20 @@ interface StoreSchema {
 // peerkit-video-chat.desktop and the icon resolves. Set before Store reads
 // userData.
 app.setName("peerkit-video-chat");
+
+function parseStartupOptionsOrExit(): DesktopStartupOptions {
+  try {
+    return parseStartupOptions(process.argv.slice(1));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`main: invalid startup options: ${message}`);
+    process.exitCode = 1;
+    app.exit(1);
+    return {};
+  }
+}
+
+const startupOptions = parseStartupOptionsOrExit();
 
 const store = new Store<StoreSchema>();
 
@@ -233,6 +251,7 @@ ipcMain.handle("chat:init", async (_event, displayName: string) => {
     if (chatInit === undefined) {
       relayAddr = getRelayAddress();
       chatInit = startChatNode({
+        ...startupOptions,
         bootstrapRelays: [relayAddr],
         displayName,
         agentKeyStore,
@@ -358,6 +377,12 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.warn("main: failed to initialise file logging:", err);
   }
+  const listenAddresses = startupOptions.relayOnly
+    ? ["/p2p-circuit"]
+    : startupOptions.listenAddresses;
+  console.info(
+    `main: PeerKit mode=${startupOptions.relayOnly ? "relay-only" : "normal"} listen-addresses=${listenAddresses?.join(",") ?? "PeerKit defaults"}`,
+  );
   buildMenu();
   void createWindow();
   app.on("activate", () => {

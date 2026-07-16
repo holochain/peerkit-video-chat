@@ -1,5 +1,15 @@
-import type { AgentId, IAgentKeyStore, RelayDialAddress } from "@peerkit/api";
+import type {
+  AgentId,
+  IAgentKeyStore,
+  NodeAddress,
+  RelayDialAddress,
+} from "@peerkit/api";
 import type { WebRtcSignal } from "./envelope.js";
+import {
+  CODE_P2P_CIRCUIT,
+  CODE_WEBRTC,
+  multiaddr,
+} from "@multiformats/multiaddr";
 import {
   PeerkitNodeBuilder,
   type PeerkitNode,
@@ -57,6 +67,10 @@ export interface ChatNodeOptions {
   agentKeyStore: IAgentKeyStore;
   events: RoomEvents;
   transportFactory?: PeerkitNodeTransportFactory;
+  /** Explicit PeerKit listen and advertised addresses. */
+  listenAddresses?: NodeAddress[];
+  /** Restrict PeerKit listening, advertising, and outbound dialing to circuits. */
+  relayOnly?: boolean;
   /** Called whenever the observed set of active network rooms changes. */
   onNetworkRooms?: (rooms: NetworkRoomEntry[]) => void;
   /** Called whenever peer connectivity changes (discovered/connected counts). */
@@ -82,6 +96,10 @@ export interface ChatNode {
 export async function startChatNode(
   options: ChatNodeOptions,
 ): Promise<ChatNode> {
+  if (options.relayOnly === true && options.listenAddresses !== undefined) {
+    throw new Error("relayOnly cannot be combined with explicit listenAddresses");
+  }
+
   const roomRef: { current: Room | undefined } = { current: undefined };
 
   // ── Network room tracker ──────────────────────────────────────────────────
@@ -217,15 +235,52 @@ export async function startChatNode(
     (noReservationUntil.get(agentId) ?? 0) > Date.now();
   // ──────────────────────────────────────────────────────────────────────────
 
-  const tryDial = async (node: PeerkitNode, agentId: AgentId): Promise<void> => {
-    if (agentId === node.keyPair.agentId()) return;
-    if (node.isConnected(agentId)) return;
-    if (dialPaused(agentId)) return; // TEMPORARY: see block above
+  function relayDialAddresses(
+    agentId: AgentId,
+    addresses: NodeAddress[],
+  ): NodeAddress[] {
+    const relayed: NodeAddress[] = [];
+    for (const address of addresses) {
+      try {
+        const components = multiaddr(address).getComponents();
+        // WebRTC Direct may be the transport used to reach the relay itself.
+        // The circuit component still guarantees that the peer hop is relayed.
+        if (
+          components.some((component) => component.code === CODE_P2P_CIRCUIT) &&
+          components.every((component) => component.code !== CODE_WEBRTC)
+        ) {
+          relayed.push(address);
+        }
+      } catch {
+        console.warn(
+          `chat-node: ${peerLabel(agentId)} advertised a malformed address — skipping it`,
+        );
+      }
+    }
+    return relayed;
+  }
+
+  const tryDial = async (
+    node: PeerkitNode,
+    agentId: AgentId,
+  ): Promise<boolean> => {
+    if (agentId === node.keyPair.agentId()) return false;
+    if (node.isConnected(agentId)) return false;
+    if (dialPaused(agentId)) return false; // TEMPORARY: see block above
     const info = node.agentStore.get(agentId);
-    if (info === undefined) return;
+    if (info === undefined) return false;
+    const addresses = options.relayOnly
+      ? relayDialAddresses(agentId, info.addresses)
+      : info.addresses;
+    if (addresses.length === 0) {
+      console.info(
+        `chat-node: ${peerLabel(agentId)} has no ${options.relayOnly ? "relayed" : "dialable"} address — skipping dial`,
+      );
+      return false;
+    }
     try {
       // connect() takes the peer's full address list and tries each itself.
-      await node.transport.connect(info.addresses);
+      await node.transport.connect(addresses);
     } catch (err) {
       // TEMPORARY: pause dials to a peer the relay won't reserve for.
       if (isNoReservation(err)) {
@@ -233,22 +288,23 @@ export async function startChatNode(
         console.info(
           `chat-node: ${peerLabel(agentId)} has no relay reservation — pausing dials for ${NO_RESERVATION_COOLDOWN_MS / 1000}s`,
         );
-        return;
+        return false;
       }
       console.warn(
         `chat-node: dial ${agentId.slice(0, 12)} failed: ${(err as Error).message}`,
       );
     }
+    return true;
   };
 
   const tryDialWithRetry = async (node: PeerkitNode, agentId: AgentId): Promise<void> => {
     if (dialPaused(agentId)) return; // TEMPORARY: see block above
-    await tryDial(node, agentId);
+    if (!(await tryDial(node, agentId))) return;
     for (const delay of [1000, 2000, 4000]) {
       if (node.isConnected(agentId)) return;
       if (dialPaused(agentId)) return; // TEMPORARY: paused mid-retry
       await new Promise<void>((r) => setTimeout(r, delay));
-      await tryDial(node, agentId);
+      if (!(await tryDial(node, agentId))) return;
     }
   };
 
@@ -380,6 +436,11 @@ export async function startChatNode(
 
   if (options.id !== undefined) {
     builder.withId(options.id);
+  }
+  if (options.relayOnly === true) {
+    builder.withAddresses(["/p2p-circuit"]);
+  } else if (options.listenAddresses !== undefined) {
+    builder.withAddresses(options.listenAddresses);
   }
   if (options.transportFactory !== undefined) {
     builder.withTransportFactory(options.transportFactory);

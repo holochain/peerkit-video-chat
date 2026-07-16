@@ -17,6 +17,8 @@ import {
   ACCEPTOR_GIVEUP_MS,
   DTLS_STALL_MS,
   RECOVERY_ATTEMPT_MS,
+  RTP_STATS_INTERVAL_MS,
+  MockMediaStreamTrack,
   createdPeers,
   flush,
   installGlobals,
@@ -33,6 +35,7 @@ const SELF = "agent-self";
 const PEER = "agent-zzz";
 
 let h: Harness;
+let diagnosticLogs: Array<{ level: string; message: string }>;
 // Re-imported per test so the binding picks up freshly-installed globals.
 let webrtc: typeof import("../src/renderer/src/webrtc/index");
 // A fresh controller instance per test → recovery state never leaks between cases.
@@ -77,6 +80,7 @@ beforeEach(async () => {
   vi.useFakeTimers();
   resetPeers();
   h = installGlobals();
+  diagnosticLogs = [];
   vi.resetModules();
   webrtc = await import("../src/renderer/src/webrtc/index");
   ctrl = webrtc.createMediaController({
@@ -93,6 +97,9 @@ beforeEach(async () => {
         credential: "test",
       },
     ],
+    log: (level, message) => {
+      diagnosticLogs.push({ level, message });
+    },
   });
 });
 
@@ -458,5 +465,307 @@ describe("recovery ICE generation gating", () => {
     });
     await flush();
     expect(pc.addIceCandidate.mock.calls.length).toBeGreaterThan(addsBeforeOffer);
+  });
+});
+
+function diagnosticStatsSample(
+  byteOffset: number,
+): Map<string, Record<string, unknown>> {
+  return new Map([
+    [
+      "transport",
+      {
+        id: "transport",
+        type: "transport",
+        selectedCandidatePairId: "pair",
+      },
+    ],
+    [
+      "pair",
+      {
+        id: "pair",
+        type: "candidate-pair",
+        state: "succeeded",
+        nominated: true,
+        localCandidateId: "local",
+        remoteCandidateId: "remote",
+        currentRoundTripTime: 0.025,
+      },
+    ],
+    [
+      "local",
+      {
+        id: "local",
+        type: "local-candidate",
+        candidateType: "relay",
+        protocol: "udp",
+        relayProtocol: "tcp",
+      },
+    ],
+    [
+      "remote",
+      {
+        id: "remote",
+        type: "remote-candidate",
+        candidateType: "host",
+        protocol: "tcp",
+      },
+    ],
+    [
+      "inbound-audio",
+      {
+        id: "inbound-audio",
+        type: "inbound-rtp",
+        kind: "audio",
+        bytesReceived: 1_000 + byteOffset,
+        packetsReceived: 100 + byteOffset / 10,
+        packetsLost: 2,
+        jitter: 0.012,
+        audioLevel: 0.25,
+      },
+    ],
+    [
+      "outbound-video",
+      {
+        id: "outbound-video",
+        type: "outbound-rtp",
+        kind: "video",
+        bytesSent: 2_000 + byteOffset,
+        packetsSent: 200 + byteOffset / 10,
+        framesEncoded: 30 + byteOffset / 10,
+      },
+    ],
+  ]);
+}
+
+describe("sanitized media diagnostics", () => {
+  it("summarizes SDP and candidates without logging sensitive contents", async () => {
+    const candidate = JSON.stringify({
+      candidate:
+        "candidate:1 1 udp 2122260223 192.0.2.77 45678 typ relay raddr 10.0.0.4 rport 5000",
+      sdpMid: "audio",
+      sdpMLineIndex: 0,
+      usernameFragment: "ICE_SECRET",
+    });
+    await ctrl.handleSignal(PEER, { kind: "ice", candidate });
+    await ctrl.handleSignal(PEER, { kind: "ice", candidate: "" });
+
+    const sdp = [
+      "v=0",
+      "o=- 0 0 IN IP4 192.0.2.99",
+      "a=fingerprint:sha-256 FP_REMOTE_SECRET",
+      "a=ice-pwd:TURN_SECRET",
+      "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+      "a=mid:audio",
+      "a=sendrecv",
+      "m=video 9 UDP/TLS/RTP/SAVPF 96",
+      "a=mid:video",
+      "a=recvonly",
+      "",
+    ].join("\r\n");
+    await ctrl.handleSignal(PEER, { kind: "offer", sdp });
+    await flush();
+
+    const output = diagnosticLogs.map((entry) => entry.message).join("\n");
+    expect(output).toContain(
+      "remote offer bytes=",
+    );
+    expect(output).toContain("audio(mid=audio,direction=sendrecv)");
+    expect(output).toContain("video(mid=video,direction=recvonly)");
+    expect(output).toContain(
+      "remote ICE type=relay protocol=udp relayProtocol=unknown mid=audio buffering",
+    );
+    expect(output).toContain("remote ICE draining count=1");
+    expect(output).toContain("remote ICE end-of-candidates draining");
+    expect(output).not.toContain("FP_REMOTE_SECRET");
+    expect(output).not.toContain("TURN_SECRET");
+    expect(output).not.toContain("ICE_SECRET");
+    expect(output).not.toContain("192.0.2.77");
+    expect(output).not.toContain("45678");
+  });
+
+  it("does not interpolate a malformed sdpMLineIndex into diagnostics", async () => {
+    // A remote peer controls the raw payload, so sdpMLineIndex may be anything.
+    const candidate = JSON.stringify({
+      candidate: "candidate:1 1 udp 2122260223 192.0.2.77 45678 typ relay",
+      sdpMLineIndex: "0\nINJECTED_LINE",
+    });
+    await ctrl.handleSignal(PEER, { kind: "ice", candidate });
+
+    const output = diagnosticLogs.map((entry) => entry.message).join("\n");
+    expect(output).toContain("mline=unknown");
+    expect(output).not.toContain("INJECTED_LINE");
+  });
+
+  it("logs permissions, state transitions, tracks, camera replacement, and teardown", async () => {
+    await ctrl.initiateCall(PEER);
+    await flush();
+    const pc = createdPeers[0]!;
+    const inbound = new MockMediaStreamTrack("video", "PRIVATE_TRACK_ID");
+    pc._setSignaling("have-local-offer");
+    pc._setGathering("gathering");
+    pc._emitIce({
+      candidate: "candidate:2 1 udp 1 198.51.100.44 55000 typ relay",
+      protocol: "udp",
+      relayProtocol: "tcp",
+      sdpMid: "video",
+      sdpMLineIndex: 1,
+      type: "relay",
+      toJSON: () => ({
+        candidate: "candidate:2 1 udp 1 198.51.100.44 55000 typ relay",
+        sdpMid: "video",
+        sdpMLineIndex: 1,
+      }),
+    });
+    pc._emitTrack(inbound);
+    inbound._emit("mute");
+    inbound._emit("unmute");
+    inbound._emit("ended");
+    pc._setIce("checking");
+    pc._setDtls("connecting");
+    pc._setConn("connecting");
+    await ctrl.setCamMuted(true);
+    await ctrl.setCamMuted(false);
+    ctrl.closePeer(PEER);
+
+    const output = diagnosticLogs.map((entry) => entry.message).join("\n");
+    expect(output).toContain("local permissions camera=granted microphone=granted");
+    expect(output).toContain(
+      "peer connection created icePolicy=all stun=true turn=true",
+    );
+    expect(output).toContain("signaling -> have-local-offer");
+    expect(output).toContain("ice gathering -> gathering");
+    expect(output).toContain(
+      "local ICE type=relay protocol=udp relayProtocol=tcp mid=video sending",
+    );
+    expect(output).toContain("inbound track attached kind=video");
+    expect(output).toContain("inbound track muted kind=video");
+    expect(output).toContain("inbound track unmuted kind=video");
+    expect(output).toContain("inbound track ended kind=video");
+    expect(output).toContain("dtls -> connecting");
+    expect(output).toContain("outbound video track replaced with none");
+    expect(output).toContain("outbound video track replaced with live track");
+    expect(output).toContain("teardown");
+    expect(output).not.toContain("PRIVATE_TRACK_ID");
+    expect(output).not.toContain("198.51.100.44");
+    expect(output).not.toContain("55000");
+    expect(diagnosticLogs.some((entry) => entry.level === "debug")).toBe(true);
+  });
+});
+
+describe("RTP diagnostics", () => {
+  it("samples immediately and reports interval counter deltas", async () => {
+    await ctrl.initiateCall(PEER);
+    const pc = createdPeers[0]!;
+    pc.getStats
+      .mockResolvedValueOnce(diagnosticStatsSample(0))
+      .mockResolvedValueOnce(diagnosticStatsSample(500));
+    await connect(pc);
+
+    expect(pc.getStats).toHaveBeenCalledTimes(1);
+    let output = diagnosticLogs.map((entry) => entry.message).join("\n");
+    expect(output).toContain(
+      "stats path local=relay/udp remote=host/tcp relayProtocol=tcp rtt=25ms",
+    );
+    expect(output).toContain("inbound.audio bytes=1000(+initial)");
+    expect(output).toContain("packets=100(+initial)");
+    expect(output).toContain("lost=2 jitter=12ms");
+    expect(output).toContain("audioLevel=0.250");
+
+    await vi.advanceTimersByTimeAsync(RTP_STATS_INTERVAL_MS);
+    await flush();
+    expect(pc.getStats).toHaveBeenCalledTimes(2);
+    output = diagnosticLogs.map((entry) => entry.message).join("\n");
+    expect(output).toContain("inbound.audio bytes=1500(+500)");
+    expect(output).toContain("packets=150(+50)");
+    expect(output).toContain("outbound.video bytes=2500(+500)");
+  });
+
+  it("does not overlap getStats polling", async () => {
+    await ctrl.initiateCall(PEER);
+    const pc = createdPeers[0]!;
+    let resolveStats: (
+      stats: Map<string, Record<string, unknown>>,
+    ) => void = () => {};
+    pc.getStats.mockImplementationOnce(
+      async () =>
+        new Promise<Map<string, Record<string, unknown>>>((resolve) => {
+          resolveStats = resolve;
+        }),
+    );
+    await connect(pc);
+
+    await vi.advanceTimersByTimeAsync(RTP_STATS_INTERVAL_MS * 2);
+    expect(pc.getStats).toHaveBeenCalledTimes(1);
+    expect(
+      diagnosticLogs.some((entry) =>
+        entry.message.includes("stats sample skipped; previous sample in flight"),
+      ),
+    ).toBe(true);
+
+    resolveStats(diagnosticStatsSample(0));
+    await flush();
+    pc.getStats.mockResolvedValueOnce(diagnosticStatsSample(100));
+    await vi.advanceTimersByTimeAsync(RTP_STATS_INTERVAL_MS);
+    await flush();
+    expect(pc.getStats).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops sampling on disconnect, replacement, and close", async () => {
+    await ctrl.initiateCall(PEER);
+    const first = createdPeers[0]!;
+    first.getStats.mockResolvedValue(diagnosticStatsSample(0));
+    await connect(first);
+    expect(first.getStats).toHaveBeenCalledTimes(1);
+
+    first._setConn("disconnected");
+    await vi.advanceTimersByTimeAsync(RTP_STATS_INTERVAL_MS * 2);
+    expect(first.getStats).toHaveBeenCalledTimes(1);
+
+    first._setConn("connected");
+    await flush();
+    expect(first.getStats).toHaveBeenCalledTimes(2);
+    await ctrl.handleSignal(PEER, {
+      kind: "offer",
+      sdp: sdpWithFingerprint("FP_REMOTE_REPLACEMENT"),
+    });
+    await flush();
+    await vi.advanceTimersByTimeAsync(RTP_STATS_INTERVAL_MS * 2);
+    expect(first.getStats).toHaveBeenCalledTimes(2);
+
+    ctrl.closePeer(PEER);
+    await vi.advanceTimersByTimeAsync(RTP_STATS_INTERVAL_MS * 2);
+    expect(first.getStats).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let a stale pending getStats block a restarted sampler", async () => {
+    await ctrl.initiateCall(PEER);
+    const pc = createdPeers[0]!;
+    let resolveStats: (
+      stats: Map<string, Record<string, unknown>>,
+    ) => void = () => {};
+    pc.getStats.mockImplementationOnce(
+      async () =>
+        new Promise<Map<string, Record<string, unknown>>>((resolve) => {
+          resolveStats = resolve;
+        }),
+    );
+    await connect(pc);
+    expect(pc.getStats).toHaveBeenCalledTimes(1);
+
+    // The sampler stops while the first getStats is still pending, then restarts.
+    pc._setConn("disconnected");
+    await flush();
+    pc.getStats.mockResolvedValue(diagnosticStatsSample(0));
+    pc._setConn("connected");
+    await flush();
+    expect(pc.getStats).toHaveBeenCalledTimes(2);
+
+    // The stale request settling must not disturb the restarted sampler either.
+    resolveStats(diagnosticStatsSample(0));
+    await flush();
+    await vi.advanceTimersByTimeAsync(RTP_STATS_INTERVAL_MS);
+    await flush();
+    expect(pc.getStats).toHaveBeenCalledTimes(3);
   });
 });

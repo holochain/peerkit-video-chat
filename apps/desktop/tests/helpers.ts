@@ -16,6 +16,7 @@ export {
   ACCEPTOR_GIVEUP_MS,
   DTLS_STALL_MS,
   RECOVERY_ATTEMPT_MS,
+  RTP_STATS_INTERVAL_MS,
 } from "../src/renderer/src/webrtc/peer-connection.js";
 
 /** Every mock peer connection constructed since the last reset, in order. */
@@ -86,6 +87,8 @@ export class MockPeerConnection {
   ontrack: Handler = null;
   oniceconnectionstatechange: Handler = null;
   onconnectionstatechange: Handler = null;
+  onicegatheringstatechange: Handler = null;
+  onsignalingstatechange: Handler = null;
 
   // Distinct local DTLS fingerprint per pc; stable across the pc's lifetime so
   // an ICE restart (same pc) re-offers the same fingerprint and a full
@@ -166,6 +169,24 @@ export class MockPeerConnection {
     this.connectionState = state;
     this.onconnectionstatechange?.(new Event("connectionstatechange"));
   }
+  /** Set ICE gathering state and fire the handler. */
+  _setGathering(state: RTCIceGatheringState): void {
+    this.iceGatheringState = state;
+    this.onicegatheringstatechange?.(new Event("icegatheringstatechange"));
+  }
+  /** Set signaling state and fire the handler. */
+  _setSignaling(state: RTCSignalingState): void {
+    this.signalingState = state;
+    this.onsignalingstatechange?.(new Event("signalingstatechange"));
+  }
+  /** Emit one local ICE candidate or the end-of-candidates sentinel. */
+  _emitIce(candidate: unknown): void {
+    this.onicecandidate?.({ candidate });
+  }
+  /** Emit one inbound media track. */
+  _emitTrack(track: MockMediaStreamTrack): void {
+    this.ontrack?.({ track, streams: [] });
+  }
   /** Move DTLS state and notify the watchdog listener. */
   _setDtls(state: RTCDtlsTransportState): void {
     this.dtls._set(state);
@@ -176,14 +197,31 @@ export class MockPeerConnection {
   }
 }
 
-class MockMediaStreamTrack {
+export class MockMediaStreamTrack {
   enabled = true;
+  muted = false;
   readyState = "live";
+  private readonly listeners = new Map<string, Set<() => void>>();
   constructor(
     public kind: string,
     public id: string,
   ) {}
   stop = vi.fn();
+
+  addEventListener(type: string, listener: () => void): void {
+    const listeners = this.listeners.get(type) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: () => void): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  /** Test hook: emits a media-track lifecycle event. */
+  _emit(type: "ended" | "mute" | "unmute"): void {
+    for (const listener of this.listeners.get(type) ?? []) listener();
+  }
 }
 
 class MockMediaStream {

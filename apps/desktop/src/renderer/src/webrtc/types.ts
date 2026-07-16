@@ -9,7 +9,7 @@ export type StreamCallback = (
 
 export type SpeakingCallback = (agentId: string, speaking: boolean) => void;
 
-export type LogLevel = "info" | "warn";
+export type LogLevel = "debug" | "info" | "warn";
 
 /** Resolves an agentId to a human-readable display name for log lines. */
 export type PeerNameResolver = (agentId: string) => string | undefined;

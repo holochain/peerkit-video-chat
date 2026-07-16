@@ -72,6 +72,140 @@ export const ACCEPTOR_GIVEUP_MS = 30_000;
 // full attempt: answer round-trip + ICE checks + DTLS. Kept above DTLS_STALL_MS
 // so a healthy-but-slow attempt is not pre-empted before its own DTLS watchdog.
 export const RECOVERY_ATTEMPT_MS = 12_000;
+/** Interval between compact RTP diagnostic samples for connected peers. */
+export const RTP_STATS_INTERVAL_MS = 5_000;
+
+interface CandidateDiagnostic {
+  candidate?: string | null;
+  protocol?: string | null;
+  relayProtocol?: string | null;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  type?: string | null;
+}
+
+interface SdpMediaSection {
+  direction?: string;
+  kind: string;
+  mid?: string;
+}
+
+interface DiagnosticStat {
+  audioLevel?: unknown;
+  bytesReceived?: unknown;
+  bytesSent?: unknown;
+  candidateType?: unknown;
+  currentRoundTripTime?: unknown;
+  framesDecoded?: unknown;
+  framesDropped?: unknown;
+  framesEncoded?: unknown;
+  id?: unknown;
+  jitter?: unknown;
+  kind?: unknown;
+  localCandidateId?: unknown;
+  mediaType?: unknown;
+  nominated?: unknown;
+  packetsLost?: unknown;
+  packetsReceived?: unknown;
+  packetsSent?: unknown;
+  protocol?: unknown;
+  relayProtocol?: unknown;
+  remoteCandidateId?: unknown;
+  selectedCandidatePairId?: unknown;
+  selected?: unknown;
+  state?: unknown;
+  type?: unknown;
+}
+
+interface RtpAggregate {
+  audioLevel?: number;
+  bytes: number;
+  direction: "inbound" | "outbound";
+  framesDecoded: number;
+  framesDropped: number;
+  framesEncoded: number;
+  jitter?: number;
+  kind: string;
+  packets: number;
+  packetsLost: number;
+}
+
+interface RtpCounter {
+  bytes: number;
+  packets: number;
+}
+
+function safeDiagnosticToken(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-z0-9_.-]{1,32}$/i.test(value)) {
+    return "unknown";
+  }
+  return value.toLowerCase();
+}
+
+function candidateDiagnostic(candidate: CandidateDiagnostic): string {
+  const tokens = candidate.candidate?.trim().split(/\s+/) ?? [];
+  const typeIndex = tokens.indexOf("typ");
+  const type = safeDiagnosticToken(
+    candidate.type ?? (typeIndex >= 0 ? tokens[typeIndex + 1] : undefined),
+  );
+  const protocol = safeDiagnosticToken(candidate.protocol ?? tokens[2]);
+  const relayProtocol = safeDiagnosticToken(candidate.relayProtocol);
+  const mid = safeDiagnosticToken(candidate.sdpMid);
+  // sdpMLineIndex arrives from remote JSON, so it may hold any runtime value.
+  const mline = Number.isInteger(candidate.sdpMLineIndex)
+    ? String(candidate.sdpMLineIndex)
+    : "unknown";
+  const media = mid !== "unknown" ? `mid=${mid}` : `mline=${mline}`;
+  return `type=${type} protocol=${protocol} relayProtocol=${relayProtocol} ${media}`;
+}
+
+function isIceCandidateInit(value: unknown): value is RTCIceCandidateInit {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "candidate" in value &&
+    typeof value.candidate === "string"
+  );
+}
+
+function sdpDiagnostic(sdp: string): string {
+  const sections: SdpMediaSection[] = [];
+  let sessionDirection: string | undefined;
+  let current: SdpMediaSection | undefined;
+  for (const line of sdp.split(/\r?\n/)) {
+    if (line.startsWith("m=")) {
+      const kind = safeDiagnosticToken(line.slice(2).split(/\s+/, 1)[0]);
+      current = { kind };
+      sections.push(current);
+      continue;
+    }
+    if (line.startsWith("a=mid:") && current !== undefined) {
+      current.mid = safeDiagnosticToken(line.slice("a=mid:".length));
+      continue;
+    }
+    const direction = /^a=(sendrecv|sendonly|recvonly|inactive)$/.exec(line)?.[1];
+    if (direction !== undefined) {
+      if (current === undefined) sessionDirection = direction;
+      else current.direction = direction;
+    }
+  }
+  const media = sections
+    .filter((section) => section.kind === "audio" || section.kind === "video")
+    .map(
+      (section) =>
+        `${section.kind}(mid=${section.mid ?? "unknown"},direction=${section.direction ?? sessionDirection ?? "unspecified"})`,
+    )
+    .join(",");
+  return `bytes=${new TextEncoder().encode(sdp).byteLength} media=${media || "none"}`;
+}
+
+function numericStat(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function errorDiagnostic(error: unknown): string {
+  return error instanceof Error ? safeDiagnosticToken(error.name) : "unknown";
+}
 
 /**
  * Extract the DTLS fingerprint from an SDP blob. The fingerprint is stable for
@@ -124,6 +258,21 @@ export class SharedMediaController implements MediaController {
   // track to a stable per-peer stream at negotiation means frames simply start
   // flowing into the already-attached tile when the camera comes on.
   private readonly remoteStreamsByPeer = new Map<string, MediaStreamLike>();
+  // Lifecycle observers installed on media tracks and DTLS transports.
+  private readonly trackObservers = new Map<string, Array<() => void>>();
+  private readonly dtlsObservers = new Map<string, () => void>();
+  // Connected-peer RTP samplers and their interval baselines.
+  private readonly statsTimers = new Map<
+    string,
+    ReturnType<typeof setInterval>
+  >();
+  // Maps each peer to the token of its active getStats request, so a stale
+  // request from a stopped sampler can neither block nor unblock a new run.
+  private readonly statsInFlight = new Map<string, symbol>();
+  private readonly previousRtpCounters = new Map<
+    string,
+    Map<string, RtpCounter>
+  >();
 
   private localStream: MediaStreamLike | null = null;
   // In-flight local media acquisition, so concurrent callers await the same work
@@ -215,19 +364,22 @@ export class SharedMediaController implements MediaController {
     const pc = this.buildPeerConnection(toAgentId);
     this.offererPeers.add(toAgentId);
     try {
-      for (const track of stream.getTracks()) {
-        pc.addTrack(track, stream);
-      }
+      this.attachLocalTracks(pc, toAgentId, stream);
       // Reserve a sendrecv video m-line even when the camera is off, so it can be
       // enabled mid-call via replaceTrack without renegotiating.
       this.trackVideoSender(pc, toAgentId, true);
+      this.observeDtls(toAgentId, pc);
       const offer = await pc.createOffer();
+      this.logSdp(toAgentId, "local", "offer", offer.sdp ?? "");
       await pc.setLocalDescription(offer);
       await this.deps.sendSignal(toAgentId, { kind: "offer", sdp: offer.sdp ?? "" });
     } catch (err) {
       // buildPeerConnection already registered the pc; tear it down so a retry is
       // not short-circuited by this.peers.has() and no stale callbacks/timers live on.
-      this.warnPeer(toAgentId, `initial offer failed: ${String(err)}`);
+      this.warnPeer(
+        toAgentId,
+        `initial offer failed error=${errorDiagnostic(err)}`,
+      );
       this.closePeer(toAgentId);
       throw err;
     }
@@ -235,6 +387,7 @@ export class SharedMediaController implements MediaController {
 
   async handleSignal(fromAgentId: string, signal: WebRtcSignal): Promise<void> {
     if (signal.kind === "offer") {
+      this.logSdp(fromAgentId, "remote", "offer", signal.sdp);
       const existingPc = this.peers.get(fromAgentId);
       if (existingPc !== undefined) {
         // A recovery offer landed — cancel the acceptor's give-up timer.
@@ -248,6 +401,7 @@ export class SharedMediaController implements MediaController {
           // The new generation's remote description is now in place.
           this.awaitingRecoveryDescription.delete(fromAgentId);
           const answer = await existingPc.createAnswer();
+          this.logSdp(fromAgentId, "local", "answer", answer.sdp ?? "");
           await existingPc.setLocalDescription(answer);
           await this.deps.sendSignal(fromAgentId, { kind: "answer", sdp: answer.sdp ?? "" });
           // Apply candidates buffered for this restart generation while we waited.
@@ -258,6 +412,9 @@ export class SharedMediaController implements MediaController {
         // reconnect or page reload). Our pc is stale and its m-lines won't match
         // the fresh offer — discard it and accept the offer on a new pc by
         // falling through to the fresh-acceptor path below.
+        this.stopStatsSampler(fromAgentId);
+        this.clearTrackObservers(fromAgentId);
+        this.clearDtlsObserver(fromAgentId);
         existingPc.close();
         this.peers.delete(fromAgentId);
         this.pendingCandidates.delete(fromAgentId);
@@ -273,24 +430,24 @@ export class SharedMediaController implements MediaController {
       const stream = await this.acquireLocalStream();
       const pc = this.buildPeerConnection(fromAgentId);
       try {
-        for (const track of stream.getTracks()) {
-          pc.addTrack(track, stream);
-        }
+        this.attachLocalTracks(pc, fromAgentId, stream);
         await pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
         // The fresh remote description is in place; ICE may now apply directly.
         this.awaitingRecoveryDescription.delete(fromAgentId);
         // Match the offerer's reserved video m-line so we can enable our camera
         // mid-call via replaceTrack (offer already carries a sendrecv video section).
         this.trackVideoSender(pc, fromAgentId, false);
+        this.observeDtls(fromAgentId, pc);
         // Drain any candidates that arrived before the offer (RFC 8829 §4.1.19)
         await this.drainPendingCandidates(pc, fromAgentId);
         const answer = await pc.createAnswer();
+        this.logSdp(fromAgentId, "local", "answer", answer.sdp ?? "");
         await pc.setLocalDescription(answer);
         await this.deps.sendSignal(fromAgentId, { kind: "answer", sdp: answer.sdp ?? "" });
       } catch (err) {
         // buildPeerConnection registered the pc; tear it down so a retry is not
         // short-circuited by an existing entry and no stale callbacks/timers live on.
-        this.warnPeer(fromAgentId, `answer failed: ${String(err)}`);
+        this.warnPeer(fromAgentId, `answer failed error=${errorDiagnostic(err)}`);
         this.closePeer(fromAgentId);
         throw err;
       }
@@ -311,6 +468,10 @@ export class SharedMediaController implements MediaController {
 
     if (signal.kind === "ice") {
       if (signal.candidate === "") {
+        this.debugPeer(
+          fromAgentId,
+          `remote ICE end-of-candidates ${needsRemoteDescription ? "buffering" : "applying"}`,
+        );
         // End-of-candidates (RFC 8838 §13.4.1)
         if (!needsRemoteDescription && pc !== undefined) {
           await this.applyIceCandidate(fromAgentId, pc, { candidate: "" });
@@ -319,20 +480,31 @@ export class SharedMediaController implements MediaController {
         }
         return;
       }
-      let init: RTCIceCandidateInit;
+      let parsed: unknown;
       try {
-        init = JSON.parse(signal.candidate) as RTCIceCandidateInit;
+        parsed = JSON.parse(signal.candidate);
       } catch {
         this.warnPeer(fromAgentId, "malformed ICE candidate received");
         return;
       }
+      if (!isIceCandidateInit(parsed)) {
+        this.warnPeer(fromAgentId, "malformed ICE candidate received");
+        return;
+      }
+      const init = parsed;
+      const summary = candidateDiagnostic(init);
       if (needsRemoteDescription) {
         // Offer/answer not yet processed — buffer for drain after setRemoteDescription
         const buf = this.pendingCandidates.get(fromAgentId) ?? [];
         buf.push(init);
         this.pendingCandidates.set(fromAgentId, buf);
+        this.debugPeer(
+          fromAgentId,
+          `remote ICE ${summary} buffering count=${buf.length}`,
+        );
         return;
       }
+      this.debugPeer(fromAgentId, `remote ICE ${summary} applying`);
       await this.applyIceCandidate(
         fromAgentId,
         pc,
@@ -344,6 +516,7 @@ export class SharedMediaController implements MediaController {
     // answer
     if (pc === undefined) return;
     this.logPeer(fromAgentId, "received answer");
+    this.logSdp(fromAgentId, "remote", "answer", signal.sdp);
     await pc.setRemoteDescription({ type: "answer", sdp: signal.sdp });
     // The (possibly recovery) remote description is in place; ICE may apply now.
     this.awaitingRecoveryDescription.delete(fromAgentId);
@@ -357,6 +530,10 @@ export class SharedMediaController implements MediaController {
     this.localStream?.getAudioTracks().forEach((t) => {
       t.enabled = !muted;
     });
+    this.emit("debug", `webrtc: local audio ${muted ? "muted" : "unmuted"}`);
+    for (const agentId of this.peers.keys()) {
+      this.debugPeer(agentId, `outbound audio ${muted ? "muted" : "unmuted"}`);
+    }
   }
 
   async setCamMuted(muted: boolean): Promise<void> {
@@ -370,6 +547,7 @@ export class SharedMediaController implements MediaController {
       // sending to every peer. The pre-negotiated video m-lines stay in place
       // so the camera can be turned back on without renegotiation.
       for (const t of this.localStream.getVideoTracks()) {
+        this.emit("debug", "webrtc: local video track stopped for camera mute");
         t.stop();
         this.localStream.removeTrack(t);
       }
@@ -377,8 +555,12 @@ export class SharedMediaController implements MediaController {
         [...this.videoSenders.entries()].map(async ([agentId, sender]) => {
           try {
             await sender.replaceTrack(null);
+            this.debugPeer(agentId, "outbound video track replaced with none");
           } catch (err) {
-            this.warnPeer(agentId, `camera mute failed: ${String(err)}`);
+            this.warnPeer(
+              agentId,
+              `camera mute failed error=${errorDiagnostic(err)}`,
+            );
           }
         }),
       );
@@ -392,6 +574,10 @@ export class SharedMediaController implements MediaController {
     const s = await this.platform.getUserMedia({ video: this.videoConstraint() });
     const track = s.getVideoTracks()[0];
     if (track === undefined) return;
+    this.emit(
+      "debug",
+      `webrtc: local video track acquired enabled=${track.enabled} muted=${track.muted} state=${track.readyState}`,
+    );
     // getUserMedia is async: a mute toggle (or call teardown) may have raced ahead
     // while it was pending. If the camera is no longer wanted, or the call is gone,
     // discard the freshly acquired track instead of streaming it to peers.
@@ -404,8 +590,13 @@ export class SharedMediaController implements MediaController {
       [...this.videoSenders.entries()].map(async ([agentId, sender]) => {
         try {
           await sender.replaceTrack(track);
+          this.debugPeer(agentId, "outbound video track replaced with live track");
+          this.observeTrack(agentId, "outbound", track);
         } catch (err) {
-          this.warnPeer(agentId, `camera unmute failed: ${String(err)}`);
+          this.warnPeer(
+            agentId,
+            `camera unmute failed error=${errorDiagnostic(err)}`,
+          );
         }
       }),
     );
@@ -422,9 +613,14 @@ export class SharedMediaController implements MediaController {
     this.remoteStreamsByPeer.delete(agentId);
     this.platform.speaking.stop(agentId);
     this.onRemoteStream?.(agentId, null);
+    this.debugPeer(agentId, "inbound media detached");
   }
 
   closePeer(agentId: string): void {
+    this.logPeer(agentId, "teardown");
+    this.stopStatsSampler(agentId);
+    this.clearTrackObservers(agentId);
+    this.clearDtlsObserver(agentId);
     this.peers.get(agentId)?.close();
     this.peers.delete(agentId);
     this.pendingCandidates.delete(agentId);
@@ -438,9 +634,7 @@ export class SharedMediaController implements MediaController {
     this.clearAcceptorGiveup(agentId);
     this.clearRecoveryTimeout(agentId);
     this.videoSenders.delete(agentId);
-    this.remoteStreamsByPeer.delete(agentId);
-    this.platform.speaking.stop(agentId);
-    this.onRemoteStream?.(agentId, null);
+    this.resetRemoteMedia(agentId);
   }
 
   closeAll(): void {
@@ -462,6 +656,15 @@ export class SharedMediaController implements MediaController {
     this.recoveryTimers.clear();
     this.videoSenders.clear();
     this.remoteStreamsByPeer.clear();
+    for (const agentId of [...this.statsTimers.keys()]) {
+      this.stopStatsSampler(agentId);
+    }
+    for (const agentId of [...this.trackObservers.keys()]) {
+      this.clearTrackObservers(agentId);
+    }
+    for (const agentId of [...this.dtlsObservers.keys()]) {
+      this.clearDtlsObserver(agentId);
+    }
     // Stop all remaining speaking detectors (includes local "self" detection).
     this.platform.speaking.stopAll();
     this.localStream?.getTracks().forEach((t) => t.stop());
@@ -499,6 +702,10 @@ export class SharedMediaController implements MediaController {
   private async createLocalStream(): Promise<MediaStreamLike> {
     // Trigger the OS-level permission prompt before getUserMedia.
     const access = await this.deps.requestMediaAccess();
+    this.emit(
+      "debug",
+      `webrtc: local permissions camera=${access.camera ? "granted" : "denied"} microphone=${access.microphone ? "granted" : "denied"}`,
+    );
 
     const stream = new this.platform.MediaStream();
 
@@ -514,6 +721,10 @@ export class SharedMediaController implements MediaController {
         // Honour a mute toggled before media existed, so a pre-join mute is not lost.
         t.enabled = !this.micMuted;
         stream.addTrack(t);
+        this.emit(
+          "debug",
+          `webrtc: local audio track acquired enabled=${t.enabled} muted=${t.muted} state=${t.readyState}`,
+        );
       });
     } catch (err) {
       throw new Error(
@@ -529,9 +740,16 @@ export class SharedMediaController implements MediaController {
     if (access.camera && this.camEnabled) {
       try {
         const s = await this.platform.getUserMedia({ video: this.videoConstraint() });
-        s.getVideoTracks().forEach((t) => stream.addTrack(t));
+        s.getVideoTracks().forEach((t) => {
+          stream.addTrack(t);
+          this.emit(
+            "debug",
+            `webrtc: local video track acquired enabled=${t.enabled} muted=${t.muted} state=${t.readyState}`,
+          );
+        });
       } catch {
         // Camera unavailable — continue audio-only.
+        this.emit("debug", "webrtc: local video track unavailable; using audio only");
       }
     }
 
@@ -550,18 +768,32 @@ export class SharedMediaController implements MediaController {
       iceServers: this.deps.iceServers,
       ...(relayOnly && { iceTransportPolicy: "relay" }),
     });
+    this.debugPeer(
+      agentId,
+      `peer connection created icePolicy=${relayOnly ? "relay" : "all"} stun=${this.hasStun()} turn=${this.hasTurn()}`,
+    );
 
     pc.onicecandidate = ({ candidate }) => {
       // null sentinel = gathering complete; forward as empty string per RFC 8838 §13.4.1
       const payload = candidate !== null ? JSON.stringify(candidate.toJSON()) : "";
+      this.debugPeer(
+        agentId,
+        candidate === null
+          ? "local ICE end-of-candidates"
+          : `local ICE ${candidateDiagnostic(candidate)} sending`,
+      );
       this.deps
         .sendSignal(agentId, { kind: "ice", candidate: payload })
         .catch((err: unknown) => {
-          this.warnPeer(agentId, `ICE send failed: ${String(err)}`);
+          this.warnPeer(
+            agentId,
+            `ICE send failed error=${errorDiagnostic(err)}`,
+          );
         });
     };
 
     pc.ontrack = (ev) => {
+      this.observeTrack(agentId, "inbound", ev.track);
       // Aggregate every received track into one stable per-peer stream. Don't rely
       // on ev.streams[0] — it is empty for a track on a transceiver reserved
       // without a stream (camera-off join), and ontrack won't fire again when the
@@ -593,6 +825,14 @@ export class SharedMediaController implements MediaController {
       }
     };
 
+    pc.onsignalingstatechange = () => {
+      this.debugPeer(agentId, `signaling -> ${pc.signalingState}`);
+    };
+
+    pc.onicegatheringstatechange = () => {
+      this.debugPeer(agentId, `ice gathering -> ${pc.iceGatheringState}`);
+    };
+
     // Arm the DTLS-stall watchdog the moment ICE connectivity is established.
     // ICE "connected"/"completed" means STUN checks passed, but media still needs
     // the DTLS handshake to finish (surfaced as connectionState "connected"). On
@@ -606,7 +846,10 @@ export class SharedMediaController implements MediaController {
       if (ice === "connected" || ice === "completed") {
         if (pc.connectionState !== "connected") this.armDtlsWatchdog(agentId, pc);
       } else if (ice === "failed") {
+        this.stopStatsSampler(agentId);
         void this.recoverPeer(agentId, pc);
+      } else if (ice === "disconnected" || ice === "closed") {
+        this.stopStatsSampler(agentId);
       }
     };
 
@@ -622,9 +865,10 @@ export class SharedMediaController implements MediaController {
           (this.reconnectAttempts.get(agentId) ?? 0) > 0;
         this.clearRecoveryState(agentId);
         if (recovered) this.logPeer(agentId, "recovered");
-        void this.logConnectedPath(agentId, pc);
+        this.startStatsSampler(agentId, pc);
         return;
       }
+      this.stopStatsSampler(agentId);
       // A successful (re)negotiation moving us back into checking clears the
       // re-entry guard so the next genuine fault can advance the ladder.
       if (state === "connecting") {
@@ -644,6 +888,80 @@ export class SharedMediaController implements MediaController {
 
     this.peers.set(agentId, pc);
     return pc;
+  }
+
+  /** Attaches local tracks to one peer and records their lifecycle. */
+  private attachLocalTracks(
+    pc: RTCPeerConnection,
+    agentId: string,
+    stream: MediaStreamLike,
+  ): void {
+    for (const track of stream.getTracks()) {
+      pc.addTrack(track, stream);
+      this.observeTrack(agentId, "outbound", track);
+    }
+  }
+
+  /** Records attachment and lifecycle events without device or track identifiers. */
+  private observeTrack(
+    agentId: string,
+    direction: "inbound" | "outbound",
+    track: MediaStreamTrack,
+  ): void {
+    this.debugPeer(
+      agentId,
+      `${direction} track attached kind=${track.kind} enabled=${track.enabled} muted=${track.muted} state=${track.readyState}`,
+    );
+    const onMute = (): void => {
+      this.debugPeer(agentId, `${direction} track muted kind=${track.kind}`);
+    };
+    const onUnmute = (): void => {
+      this.debugPeer(agentId, `${direction} track unmuted kind=${track.kind}`);
+    };
+    const onEnded = (): void => {
+      this.debugPeer(agentId, `${direction} track ended kind=${track.kind}`);
+    };
+    // Some test and React Native shims implement only the track fields.
+    if (typeof track.addEventListener !== "function") return;
+    track.addEventListener("mute", onMute);
+    track.addEventListener("unmute", onUnmute);
+    track.addEventListener("ended", onEnded);
+    const cleanups = this.trackObservers.get(agentId) ?? [];
+    cleanups.push(() => {
+      track.removeEventListener("mute", onMute);
+      track.removeEventListener("unmute", onUnmute);
+      track.removeEventListener("ended", onEnded);
+    });
+    this.trackObservers.set(agentId, cleanups);
+  }
+
+  private clearTrackObservers(agentId: string): void {
+    for (const cleanup of this.trackObservers.get(agentId) ?? []) cleanup();
+    this.trackObservers.delete(agentId);
+  }
+
+  /** Installs a persistent DTLS transition observer once senders expose it. */
+  private observeDtls(agentId: string, pc: RTCPeerConnection): void {
+    this.clearDtlsObserver(agentId);
+    const transport = pc.getSenders().find((sender) => sender.transport)?.transport;
+    if (transport === null || transport === undefined) {
+      this.debugPeer(agentId, "dtls transport unavailable");
+      return;
+    }
+    this.debugPeer(agentId, `dtls -> ${transport.state}`);
+    const onStateChange = (): void => {
+      if (this.peers.get(agentId) !== pc) return;
+      this.debugPeer(agentId, `dtls -> ${transport.state}`);
+    };
+    transport.addEventListener("statechange", onStateChange);
+    this.dtlsObservers.set(agentId, () => {
+      transport.removeEventListener("statechange", onStateChange);
+    });
+  }
+
+  private clearDtlsObserver(agentId: string): void {
+    this.dtlsObservers.get(agentId)?.();
+    this.dtlsObservers.delete(agentId);
   }
 
   /**
@@ -679,12 +997,18 @@ export class SharedMediaController implements MediaController {
     const buffered = this.pendingCandidates.get(agentId);
     if (buffered !== undefined) {
       this.pendingCandidates.delete(agentId);
+      this.debugPeer(agentId, `remote ICE draining count=${buffered.length}`);
       for (const init of buffered) {
+        this.debugPeer(
+          agentId,
+          `remote ICE ${candidateDiagnostic(init)} draining`,
+        );
         await this.applyIceCandidate(agentId, pc, new this.platform.RTCIceCandidate(init));
       }
     }
     if (this.pendingEoc.has(agentId)) {
       this.pendingEoc.delete(agentId);
+      this.debugPeer(agentId, "remote ICE end-of-candidates draining");
       await this.applyIceCandidate(agentId, pc, { candidate: "" });
     }
   }
@@ -702,7 +1026,10 @@ export class SharedMediaController implements MediaController {
     try {
       await pc.addIceCandidate(candidate);
     } catch (err) {
-      this.warnPeer(agentId, `ICE candidate rejected: ${String(err)}`);
+      this.warnPeer(
+        agentId,
+        `ICE candidate rejected error=${errorDiagnostic(err)}`,
+      );
     }
   }
 
@@ -779,10 +1106,14 @@ export class SharedMediaController implements MediaController {
     this.pendingEoc.delete(agentId);
     try {
       const offer = await pc.createOffer({ iceRestart: true });
+      this.logSdp(agentId, "local", "offer", offer.sdp ?? "");
       await pc.setLocalDescription(offer);
       await this.deps.sendSignal(agentId, { kind: "offer", sdp: offer.sdp ?? "" });
     } catch (err) {
-      this.warnPeer(agentId, `ICE restart failed: ${String(err)}`);
+      this.warnPeer(
+        agentId,
+        `ICE restart failed error=${errorDiagnostic(err)}`,
+      );
       this.closePeer(agentId);
     }
   }
@@ -797,13 +1128,19 @@ export class SharedMediaController implements MediaController {
     try {
       stream = await this.acquireLocalStream();
     } catch (err) {
-      this.warnPeer(agentId, `full reconnect aborted (no media): ${String(err)}`);
+      this.warnPeer(
+        agentId,
+        `full reconnect aborted (no media) error=${errorDiagnostic(err)}`,
+      );
       this.closePeer(agentId);
       return;
     }
 
     // Discard the dead pc and its per-pc buffers, but keep offererPeers and the
     // reconnectAttempts ladder so recoverPeer can continue escalating.
+    this.stopStatsSampler(agentId);
+    this.clearTrackObservers(agentId);
+    this.clearDtlsObserver(agentId);
     this.peers.get(agentId)?.close();
     this.peers.delete(agentId);
     this.pendingCandidates.delete(agentId);
@@ -817,16 +1154,19 @@ export class SharedMediaController implements MediaController {
     this.resetRemoteMedia(agentId);
 
     const pc = this.buildPeerConnection(agentId, relayOnly);
-    for (const track of stream.getTracks()) {
-      pc.addTrack(track, stream);
-    }
+    this.attachLocalTracks(pc, agentId, stream);
     this.trackVideoSender(pc, agentId, true);
+    this.observeDtls(agentId, pc);
     try {
       const offer = await pc.createOffer();
+      this.logSdp(agentId, "local", "offer", offer.sdp ?? "");
       await pc.setLocalDescription(offer);
       await this.deps.sendSignal(agentId, { kind: "offer", sdp: offer.sdp ?? "" });
     } catch (err) {
-      this.warnPeer(agentId, `full reconnect offer failed: ${String(err)}`);
+      this.warnPeer(
+        agentId,
+        `full reconnect offer failed error=${errorDiagnostic(err)}`,
+      );
       this.closePeer(agentId);
       return;
     }
@@ -962,6 +1302,13 @@ export class SharedMediaController implements MediaController {
     });
   }
 
+  private hasStun(): boolean {
+    return this.deps.iceServers.some((server) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+      return urls.some((url) => url.startsWith("stun:") || url.startsWith("stuns:"));
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Logging / diagnostics
   // -------------------------------------------------------------------------
@@ -972,6 +1319,8 @@ export class SharedMediaController implements MediaController {
       this.deps.log(level, message);
     } else if (level === "warn") {
       console.warn(message);
+    } else if (level === "debug") {
+      console.debug(message);
     } else {
       console.info(message);
     }
@@ -994,50 +1343,205 @@ export class SharedMediaController implements MediaController {
     this.emit("info", `webrtc: ${this.tag(agentId)} ${msg}`);
   }
 
+  /** Detailed lifecycle log for a peer (debug level). */
+  private debugPeer(agentId: string, msg: string): void {
+    this.emit("debug", `webrtc: ${this.tag(agentId)} ${msg}`);
+  }
+
   /** Fault/warning log for a peer (warn level). */
   private warnPeer(agentId: string, msg: string): void {
     this.emit("warn", `webrtc: ${this.tag(agentId)} ${msg}`);
   }
 
-  /**
-   * After a connection establishes, read the selected candidate pair and log the
-   * path type (host / srflx / relay) and round-trip time. The relay case is the
-   * signal to watch in multi-party tests — it means the direct path failed and we
-   * fell back through TURN. Best-effort; silent if stats are unavailable.
-   */
-  private async logConnectedPath(
+  /** Logs an offer or answer summary without SDP contents or fingerprints. */
+  private logSdp(
+    agentId: string,
+    direction: "local" | "remote",
+    type: "answer" | "offer",
+    sdp: string,
+  ): void {
+    this.debugPeer(agentId, `${direction} ${type} ${sdpDiagnostic(sdp)}`);
+  }
+
+  /** Starts an immediate RTP sample followed by five-second samples. */
+  private startStatsSampler(agentId: string, pc: RTCPeerConnection): void {
+    this.stopStatsSampler(agentId);
+    this.debugPeer(agentId, "stats sampler started");
+    void this.sampleStats(agentId, pc);
+    const timer = setInterval(() => {
+      void this.sampleStats(agentId, pc);
+    }, RTP_STATS_INTERVAL_MS);
+    this.statsTimers.set(agentId, timer);
+  }
+
+  private stopStatsSampler(agentId: string): void {
+    const timer = this.statsTimers.get(agentId);
+    if (timer !== undefined) clearInterval(timer);
+    this.statsTimers.delete(agentId);
+    this.statsInFlight.delete(agentId);
+    this.previousRtpCounters.delete(agentId);
+  }
+
+  /** Samples one peer without allowing concurrent getStats calls. */
+  private async sampleStats(
     agentId: string,
     pc: RTCPeerConnection,
   ): Promise<void> {
+    if (this.statsInFlight.has(agentId)) {
+      this.debugPeer(agentId, "stats sample skipped; previous sample in flight");
+      return;
+    }
+    const token = Symbol(agentId);
+    this.statsInFlight.set(agentId, token);
     try {
       const stats = await pc.getStats();
-      let pairType: string | undefined;
-      let rttMs: number | undefined;
-      const local = new Map<string, string>();
-      stats.forEach((r: { type?: string; id?: string; candidateType?: string }) => {
-        if (r.type === "local-candidate" && r.id && r.candidateType) {
-          local.set(r.id, r.candidateType);
-        }
-      });
-      stats.forEach(
-        (r: {
-          type?: string;
-          state?: string;
-          nominated?: boolean;
-          localCandidateId?: string;
-          currentRoundTripTime?: number;
-        }) => {
-          if (r.type === "candidate-pair" && r.state === "succeeded" && r.nominated) {
-            pairType = r.localCandidateId ? local.get(r.localCandidateId) : undefined;
-            if (r.currentRoundTripTime != null) rttMs = Math.round(r.currentRoundTripTime * 1000);
-          }
-        },
-      );
-      const path = pairType ?? "unknown";
-      const rtt = rttMs != null ? `, rtt=${rttMs}ms` : "";
-      this.logPeer(agentId, `connected via ${path}${path === "relay" ? " (TURN)" : ""}${rtt}`);
+      if (
+        this.statsInFlight.get(agentId) !== token ||
+        this.peers.get(agentId) !== pc ||
+        pc.connectionState !== "connected"
+      ) {
+        return;
+      }
+      this.debugPeer(agentId, this.formatStatsSample(agentId, stats));
     } catch {
-      this.logPeer(agentId, "connected (path stats unavailable)");
+      if (
+        this.statsInFlight.get(agentId) === token &&
+        this.peers.get(agentId) === pc
+      ) {
+        this.debugPeer(agentId, "stats sample unavailable");
+      }
+    } finally {
+      if (this.statsInFlight.get(agentId) === token) {
+        this.statsInFlight.delete(agentId);
+      }
     }
+  }
+
+  /** Builds a compact path and RTP summary from a stats report. */
+  private formatStatsSample(
+    agentId: string,
+    stats: RTCStatsReport,
+  ): string {
+    const reports: DiagnosticStat[] = [];
+    stats.forEach((report: unknown) => {
+      reports.push(report as DiagnosticStat);
+    });
+    const reportsById = new Map<string, DiagnosticStat>();
+    for (const report of reports) {
+      if (typeof report.id === "string") reportsById.set(report.id, report);
+    }
+
+    const selectedPairId = reports.find(
+      (report) =>
+        report.type === "transport" &&
+        typeof report.selectedCandidatePairId === "string",
+    )?.selectedCandidatePairId;
+    const pair =
+      (typeof selectedPairId === "string"
+        ? reportsById.get(selectedPairId)
+        : undefined) ??
+      reports.find(
+        (report) =>
+          report.type === "candidate-pair" &&
+          report.state === "succeeded" &&
+          (report.nominated === true || report.selected === true),
+      );
+    const local =
+      typeof pair?.localCandidateId === "string"
+        ? reportsById.get(pair.localCandidateId)
+        : undefined;
+    const remote =
+      typeof pair?.remoteCandidateId === "string"
+        ? reportsById.get(pair.remoteCandidateId)
+        : undefined;
+    const relayProtocol = safeDiagnosticToken(
+      local?.relayProtocol ?? remote?.relayProtocol,
+    );
+    const rtt =
+      typeof pair?.currentRoundTripTime === "number"
+        ? `${Math.round(pair.currentRoundTripTime * 1_000)}ms`
+        : "unknown";
+    const path =
+      `path local=${safeDiagnosticToken(local?.candidateType)}/${safeDiagnosticToken(local?.protocol)}` +
+      ` remote=${safeDiagnosticToken(remote?.candidateType)}/${safeDiagnosticToken(remote?.protocol)}` +
+      ` relayProtocol=${relayProtocol} rtt=${rtt}`;
+
+    const aggregates = new Map<string, RtpAggregate>();
+    for (const report of reports) {
+      const direction =
+        report.type === "inbound-rtp"
+          ? "inbound"
+          : report.type === "outbound-rtp"
+            ? "outbound"
+            : undefined;
+      if (direction === undefined) continue;
+      const kind = safeDiagnosticToken(report.kind ?? report.mediaType);
+      if (kind !== "audio" && kind !== "video") continue;
+      const key = `${direction}.${kind}`;
+      const aggregate = aggregates.get(key) ?? {
+        bytes: 0,
+        direction,
+        framesDecoded: 0,
+        framesDropped: 0,
+        framesEncoded: 0,
+        kind,
+        packets: 0,
+        packetsLost: 0,
+      };
+      aggregate.bytes += numericStat(
+        direction === "inbound" ? report.bytesReceived : report.bytesSent,
+      );
+      aggregate.packets += numericStat(
+        direction === "inbound" ? report.packetsReceived : report.packetsSent,
+      );
+      aggregate.packetsLost += numericStat(report.packetsLost);
+      aggregate.framesDecoded += numericStat(report.framesDecoded);
+      aggregate.framesDropped += numericStat(report.framesDropped);
+      aggregate.framesEncoded += numericStat(report.framesEncoded);
+      if (typeof report.jitter === "number") {
+        aggregate.jitter = Math.max(aggregate.jitter ?? 0, report.jitter);
+      }
+      if (typeof report.audioLevel === "number") {
+        aggregate.audioLevel = Math.max(
+          aggregate.audioLevel ?? 0,
+          report.audioLevel,
+        );
+      }
+      aggregates.set(key, aggregate);
+    }
+
+    const previous = this.previousRtpCounters.get(agentId) ?? new Map();
+    const next = new Map<string, RtpCounter>();
+    const rtp = [...aggregates.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, aggregate]) => {
+        const baseline = previous.get(key);
+        const byteDelta =
+          baseline === undefined ? "initial" : String(aggregate.bytes - baseline.bytes);
+        const packetDelta =
+          baseline === undefined
+            ? "initial"
+            : String(aggregate.packets - baseline.packets);
+        next.set(key, {bytes: aggregate.bytes, packets: aggregate.packets});
+        const jitter =
+          aggregate.jitter === undefined
+            ? ""
+            : ` jitter=${Math.round(aggregate.jitter * 1_000)}ms`;
+        const audioLevel =
+          aggregate.audioLevel === undefined
+            ? ""
+            : ` audioLevel=${aggregate.audioLevel.toFixed(3)}`;
+        return (
+          `${key} bytes=${aggregate.bytes}(+${byteDelta})` +
+          ` packets=${aggregate.packets}(+${packetDelta})` +
+          ` lost=${aggregate.packetsLost}${jitter}` +
+          ` framesEncoded=${aggregate.framesEncoded}` +
+          ` framesDecoded=${aggregate.framesDecoded}` +
+          ` framesDropped=${aggregate.framesDropped}${audioLevel}`
+        );
+      })
+      .join("; ");
+    this.previousRtpCounters.set(agentId, next);
+    return `stats ${path} rtp=${rtp || "none"}`;
   }
 }

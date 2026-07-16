@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   builderOpts: undefined as { messageHandler: (from: string, data: Uint8Array) => Promise<void> } | undefined,
   observers: {} as Record<string, (...args: unknown[]) => void>,
   withIdCalled: undefined as string | undefined,
+  addresses: undefined as string[] | undefined,
   bootstrap: undefined as unknown,
   node: undefined as unknown,
 }));
@@ -22,6 +23,10 @@ vi.mock("@peerkit/peerkit", () => {
     }
     withId(id: string) {
       h.withIdCalled = id;
+      return this;
+    }
+    withAddresses(addresses: string[]) {
+      h.addresses = addresses;
       return this;
     }
     withAgentsReceivedObserver(fn: (...a: unknown[]) => void) {
@@ -56,7 +61,7 @@ interface FakeNode {
   getConnectedAgents: () => string[];
   isConnected: (id: string) => boolean;
   isDirectConnection: (id: string) => boolean;
-  transport: { connect: (addr: string) => Promise<void> };
+  transport: { connect: (addresses: string[]) => Promise<void> };
   send: (id: string, bytes: Uint8Array) => Promise<void>;
   shutDown: () => Promise<void>;
 }
@@ -95,6 +100,7 @@ beforeEach(() => {
   h.builderOpts = undefined;
   h.observers = {};
   h.withIdCalled = undefined;
+  h.addresses = undefined;
   h.bootstrap = undefined;
   h.node = makeNode();
 });
@@ -110,6 +116,104 @@ describe("startChatNode wiring", () => {
   it("passes a configured id to the builder", async () => {
     const chat = await startChatNode(baseOptions({ id: "node-x" }));
     expect(h.withIdCalled).toBe("node-x");
+    await chat.shutDown();
+  });
+
+  it("leaves builder addresses unset by default", async () => {
+    const chat = await startChatNode(baseOptions());
+    expect(h.addresses).toBeUndefined();
+    await chat.shutDown();
+  });
+
+  it("forwards explicit listen addresses", async () => {
+    const addresses = ["/ip4/127.0.0.1/tcp/4001", "/ip6/::1/tcp/4002"];
+    const chat = await startChatNode(baseOptions({ listenAddresses: addresses }));
+    expect(h.addresses).toEqual(addresses);
+    await chat.shutDown();
+  });
+
+  it("uses only the circuit listen address in relay-only mode", async () => {
+    const chat = await startChatNode(baseOptions({ relayOnly: true }));
+    expect(h.addresses).toEqual(["/p2p-circuit"]);
+    await chat.shutDown();
+  });
+
+  it("rejects relay-only combined with explicit listen addresses", async () => {
+    await expect(
+      startChatNode(
+        baseOptions({
+          relayOnly: true,
+          listenAddresses: ["/ip4/127.0.0.1/tcp/4001"],
+        }),
+      ),
+    ).rejects.toThrow(
+      "relayOnly cannot be combined with explicit listenAddresses",
+    );
+  });
+});
+
+describe("relay-only dialing", () => {
+  it("dials circuit addresses reached through WebRTC Direct", async () => {
+    const connectedWith: string[][] = [];
+    let connected = false;
+    h.node = makeNode({
+      isConnected: () => connected,
+      agentStore: {
+        get: () => ({
+          agentId: "peer",
+          addresses: [
+            "/ip4/203.0.113.10/tcp/4001",
+            "/ip4/203.0.113.11/tcp/4002/p2p-circuit",
+            "/ip4/203.0.113.12/udp/4003/webrtc/p2p-circuit",
+            "/ip4/203.0.113.13/udp/4004/webrtc-direct/p2p-circuit",
+            "not-a-multiaddr",
+          ],
+        }),
+        getAll: () => [],
+      },
+      transport: {
+        connect: async (addresses: string[]) => {
+          connectedWith.push(addresses);
+          connected = true;
+        },
+      },
+    });
+    const chat = await startChatNode(baseOptions({ relayOnly: true }));
+    h.observers.agentsReceived!(["peer"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(connectedWith).toEqual([
+      [
+        "/ip4/203.0.113.11/tcp/4002/p2p-circuit",
+        "/ip4/203.0.113.13/udp/4004/webrtc-direct/p2p-circuit",
+      ],
+    ]);
+    await chat.shutDown();
+  });
+
+  it("skips a peer with no usable circuit address", async () => {
+    const connect = vi.fn(async () => {});
+    h.node = makeNode({
+      agentStore: {
+        get: () => ({
+          agentId: "peer",
+          addresses: [
+            "/ip4/203.0.113.10/tcp/4001",
+            "not-a-multiaddr",
+          ],
+        }),
+        getAll: () => [],
+      },
+      transport: { connect },
+    });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const chat = await startChatNode(baseOptions({ relayOnly: true }));
+    h.observers.agentsReceived!(["peer"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(connect).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining("has no relayed address — skipping dial"),
+    );
+    info.mockRestore();
     await chat.shutDown();
   });
 });

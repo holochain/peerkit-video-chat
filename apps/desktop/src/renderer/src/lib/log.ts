@@ -3,11 +3,12 @@
 // packaged app has no terminal, and webrtc/connection diagnostics live here in
 // the renderer.
 
-type Level = "info" | "warn" | "error";
+type Level = "debug" | "info" | "warn" | "error";
 
 export function rendererLog(level: Level, message: string): void {
   if (level === "error") console.error(message);
   else if (level === "warn") console.warn(message);
+  else if (level === "debug") console.debug(message);
   else console.info(message);
   try {
     window.app.log(level, message);

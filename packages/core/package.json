@@ -18,6 +18,7 @@
     "build": "tsc --build"
   },
   "dependencies": {
+    "@multiformats/multiaddr": "^13.0.3",
     "@peerkit/api": "^0.1.0-alpha.14",
     "@peerkit/peerkit": "^0.1.0-alpha.14",
     "cbor-x": "^1.6.0"
