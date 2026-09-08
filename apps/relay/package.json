@@ -15,9 +15,9 @@
     "@peerkit/relay": "^0.1.0-alpha.14"
   },
   "devDependencies": {
-    "@peculiar/x509": "^2.0.0",
+    "@peculiar/x509": "^2.1.0",
     "multiformats": "^13.4.2",
     "reflect-metadata": "^0.2.2",
-    "tsx": "^4.22.4"
+    "tsx": "^4.23.13"
   }
 }
